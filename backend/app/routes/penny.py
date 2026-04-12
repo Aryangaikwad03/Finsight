@@ -2,7 +2,7 @@
 app/routes/penny.py — Penny AI Assistant endpoints
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -61,6 +61,7 @@ async def chat(
 @router.post("/upload-statement")
 async def upload_statement(
     file: UploadFile = File(...),
+    password: Optional[str] = Form(None),
     db:   AsyncSession = Depends(get_db),
     user: User         = Depends(get_current_user),
 ):
@@ -84,7 +85,7 @@ async def upload_statement(
 
     try:
         # 1. Parse statement with LLM
-        parsed = parse_bank_statement(file_bytes, file.filename, user.full_name)
+        parsed = parse_bank_statement(file_bytes, file.filename, user.full_name, password)
 
         # 2. Create a synthetic session/consent for the uploaded statement
         stmt_consent_id = f"stmt-{user_id[:8]}-{uuid.uuid4().hex[:8]}"
@@ -122,6 +123,8 @@ async def upload_statement(
         }
 
     except ValueError as e:
+        if str(e) == "encrypted_pdf":
+            raise HTTPException(status_code=401, detail="encrypted_pdf")
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         logger.error("Statement upload failed: %s", e, exc_info=True)
