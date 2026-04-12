@@ -189,12 +189,12 @@ async def get_insights(
 
     prompt = f"""{ctx}
 
-Based on this user's financial data, provide 4-5 specific, personalized insights:
-1. One observation about their top spending category
-2. One budgeting suggestion based on 50/30/20 rule
-3. One savings opportunity they might be missing
-4. One positive financial behavior to reinforce
-5. One actionable tip for next month
+Based on this user's financial data, provide 4-5 specific, personalized monthly insights:
+1. One breakdown comparing their recent monthly spending vs their savings potential
+2. One goal tracking projection (e.g. 'If you want to save ₹50k for a vacation, it will take X months based on your current ₹Y net flow.')
+3. One budgeting suggestion based on 50/30/20 rule applied to their monthly income
+4. One observation about their top spending category this month
+5. One actionable money-saving tip for next month
 
 Format as JSON array:
 [{{"type": "warning|tip|positive|saving", "title": "short title", "message": "2-3 sentence insight"}}]
