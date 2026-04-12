@@ -101,11 +101,10 @@ export default function Consent() {
     await triggerDataFetch(consent.consent_id)
   }
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0]
-    if (!file) return
+  const processUpload = async (file, password = null) => {
     const formData = new FormData()
     formData.append('file', file)
+    if (password) formData.append('password', password)
 
     setFetchPhase('fetching_data')
     setFetchMsg(`Uploading & analyzing ${file.name} (this takes about 10-20 seconds)...`)
@@ -126,11 +125,26 @@ export default function Consent() {
       }
       setTimeout(() => navigate('/transactions'), 2000)
     } catch (err) {
+      if (err.response?.status === 401 && err.response?.data?.detail === 'encrypted_pdf') {
+        const pwd = window.prompt("This PDF is password protected. Please enter the password to unlock it:")
+        if (pwd) {
+          return processUpload(file, pwd)
+        } else {
+          setFetchPhase('error')
+          setFetchMsg('Password is required to read this statement.')
+          return
+        }
+      }
       setFetchPhase('error')
       setFetchMsg(err.response?.data?.detail || 'Failed to upload statement.')
-    } finally {
-      e.target.value = null
     }
+  }
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    processUpload(file)
+    e.target.value = null
   }
 
   // ── Status helpers ─────────────────────────────────────────────────────────

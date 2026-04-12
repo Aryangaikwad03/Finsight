@@ -96,19 +96,7 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
         return type_map[txn_type]
 
     # Route DEBITS and UNKNOWN items through the ML categorizer if narration exists
-    if txn_type == "DEBIT" and narration:
-        try:
-            from app.services.categorizer import categorize_transaction_ml
-            res = categorize_transaction_ml(narration)
-            
-            # If the ML model returns a specific semantic tag (not just generic Expense/Other)
-            has_valuable_sub = bool(res["subcategory"] and res["subcategory"].lower() != "other" and res["subcategory"].lower() != "expense")
-            
-            # Accept ML suggestion if it explicitly categorized it into our major buckets or found a specific subcategory
-            if res["category"] not in ("Other", "Expense") or has_valuable_sub:
-                return (res["category"], res["subcategory"].title()) # Title case for safe frontend display
-        except Exception as e:
-            logger.error("Failed to call ML categorizer: %s", e)
+    # (ML categorizer has been disabled as per user request to remove mitulshah model dependency)
 
     # Fallbacks based on static transaction Mode constants
     mode_map = {

@@ -230,7 +230,7 @@ def chat_with_penny(
 
 # ── Bank Statement Parser ─────────────────────────────────────────────────────
 
-def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Dict:
+def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, password: str = None) -> Dict:
     """
     Parse a bank statement PDF/CSV/Excel deterministically via heuristics.
     Bypasses LLM tokens/TPM limits completely for 100x speedup.
@@ -239,9 +239,18 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
     import uuid
     from datetime import datetime
     
-    text = _extract_text_from_file(file_bytes, filename)
+    text = _extract_text_from_file(file_bytes, filename, password)
     if not text:
         raise ValueError("Could not extract text from the uploaded file.")
+
+    HEADER_MAP = {
+        "DATE": ["date", "txn date", "transaction date", "tran date", "value date", "posting date", "entry date", "effective date", "transaction on", "txn on"],
+        "DESC": ["narration", "particulars", "description", "remarks", "transaction details", "details", "reference", "remarks/description", "transaction remarks", "info", "transaction description", "narration details", "transaction particulars", "remarks details"],
+        "CREDIT": ["credit", "cr", "cr.", "deposit", "deposits", "credit amount", "amount cr", "paid in", "receipt", "received", "received amount", "inflow", "credit value", "cr amount"],
+        "DEBIT": ["debit", "dr", "dr.", "withdrawal", "withdrawals", "debit amount", "amount dr", "paid out", "payment", "spent", "outflow", "debit value", "dr amount"],
+        "BALANCE": ["balance", "closing balance", "running balance", "available balance", "ledger balance", "current balance", "balance amount", "available amt", "ledger amt"],
+        "AMOUNT": ["amount", "txn amount", "transaction amount"]
+    }
 
     transactions = []
     lines = text.split('\n')
@@ -250,12 +259,30 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
     date_regex = re.compile(r'^\s*(\d{1,2}[/\-\s]+(?:[a-zA-Z]{3,4}|\d{1,2})[/\-\s]+\d{2,4})')
     
     last_balance = None
+    num_columns_order = []
+    header_offsets = {}
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
             
+        # Detect headers dynamically if not found
+        if not num_columns_order:
+            line_lower = line.lower()
+            pos = {}
+            for key, aliases in HEADER_MAP.items():
+                for alias in aliases:
+                    # Match word boundary for safety
+                    if re.search(r'\b' + re.escape(alias) + r'\b', line_lower):
+                        pos[key] = line_lower.find(alias)
+                        break
+            if "DATE" in pos and ("DEBIT" in pos or "CREDIT" in pos or "AMOUNT" in pos or "BALANCE" in pos):
+                cols_sorted = sorted([(k, idx) for k, idx in pos.items() if k in ["DEBIT", "CREDIT", "BALANCE", "AMOUNT"]], key=lambda x: x[1])
+                num_columns_order = [k for k, _ in cols_sorted]
+                header_offsets = {k: idx for k, idx in cols_sorted}
+                continue
+
         date_match = date_regex.search(line)
         if date_match:
             raw_date = date_match.group(1).strip()
@@ -268,7 +295,20 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
                 continue
                 
             first_num_start = num_matches[0].start()
-            narration = rest_of_line[:first_num_start].strip()
+            
+            # Piece together the remaining text chunks that are NOT part of the monetary amounts
+            # By skipping the numerical blocks, we effectively extract pure description regardless of column order
+            narr_parts = []
+            last_end = 0
+            for match in num_matches:
+                narr_parts.append(rest_of_line[last_end:match.start()])
+                last_end = match.end()
+            narr_parts.append(rest_of_line[last_end:])
+            
+            narration = " ".join(narr_parts)
+            # Remove isolated DR/CR tokens and collapse whitespaces
+            narration = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', narration, flags=re.IGNORECASE)
+            narration = re.sub(r'\s+', ' ', narration).strip()
             
             # Remove commas and convert to float
             nums = [float(m.group(1).replace(',', '')) for m in num_matches]
@@ -277,35 +317,85 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
             txn_type = "DEBIT"
             balance = None
             
-            if len(nums) >= 3:
-                # Withdrawal, Deposit, Balance
-                withdrawal, deposit, balance = nums[-3], nums[-2], nums[-1]
-                if deposit > 0:
-                    amount, txn_type = deposit, "CREDIT"
-                else:
-                    amount, txn_type = withdrawal, "DEBIT"
-            elif len(nums) == 2:
-                # Amount, Balance (check Dr/Cr explicit flags)
-                amount, balance = nums[0], nums[1]
-                up_line = line.upper()
-                if ' CR' in up_line or 'CR.' in up_line:
-                    txn_type = "CREDIT"
-                elif ' DR' in up_line or 'DR.' in up_line:
-                    txn_type = "DEBIT"
-                else:
-                    # Guess via balance change if possible
+            # ── Dynamic Header-Based Assignment ──
+            assigned = {}
+            if num_columns_order and len(nums) <= len(num_columns_order) and len(nums) > 0:
+                if len(nums) == len(num_columns_order):
+                    assigned = {k: v for k, v in zip(num_columns_order, nums)}
+                elif len(nums) == len(num_columns_order) - 1 and "BALANCE" in num_columns_order:
+                    # Missing one (usually DEBIT or CREDIT were empty spaces)
+                    assigned["BALANCE"] = nums[-1]
+                    remaining_num = nums[0]
+                    
+                    # 1. Math heuristic (100% accurate if last_balance is known)
                     if last_balance is not None:
-                        txn_type = "CREDIT" if balance > last_balance else "DEBIT"
-                    else:
+                        if abs(last_balance - remaining_num - assigned["BALANCE"]) < 0.1:
+                            assigned["DEBIT"] = remaining_num
+                        elif abs(last_balance + remaining_num - assigned["BALANCE"]) < 0.1:
+                            assigned["CREDIT"] = remaining_num
+                            
+                    # 2. Text flag flags
+                    if "DEBIT" not in assigned and "CREDIT" not in assigned:
+                        up_line = line.upper()
+                        if ' CR' in up_line or 'CR.' in up_line or '(CR)' in up_line:
+                            assigned["CREDIT"] = remaining_num
+                        elif ' DR' in up_line or 'DR.' in up_line or '(DR)' in up_line:
+                            assigned["DEBIT"] = remaining_num
+                            
+                    # 3. Last resort: Character Offset Proximity 
+                    if "DEBIT" not in assigned and "CREDIT" not in assigned:
+                        if "DEBIT" in header_offsets and "CREDIT" in header_offsets:
+                            num_abs_pos = date_match.end() + first_num_start
+                            if abs(num_abs_pos - header_offsets["DEBIT"]) < abs(num_abs_pos - header_offsets["CREDIT"]):
+                                assigned["DEBIT"] = remaining_num
+                            else:
+                                assigned["CREDIT"] = remaining_num
+                        else:
+                            assigned["DEBIT"] = remaining_num # Universal default
+                elif "AMOUNT" in num_columns_order and len(nums) == 1:
+                    assigned["AMOUNT"] = nums[0]
+
+                if "AMOUNT" in assigned:
+                    amount = assigned["AMOUNT"]
+                    up_line = line.upper()
+                    txn_type = "CREDIT" if (' CR' in up_line or 'CR.' in up_line or '(CR)' in up_line) else "DEBIT"
+                else:
+                    if "CREDIT" in assigned and assigned["CREDIT"] > 0:
+                        amount = assigned["CREDIT"]
+                        txn_type = "CREDIT"
+                    elif "DEBIT" in assigned and assigned.get("DEBIT", 0) >= 0:
+                        amount = assigned["DEBIT"]
                         txn_type = "DEBIT"
-            elif len(nums) == 1:
-                # Single amount (infer type via text flags)
-                amount = nums[0]
-                up_line = line.upper()
-                txn_type = "CREDIT" if (' CR' in up_line or 'CR.' in up_line) else "DEBIT"
-            else:
-                continue
-                
+
+                if "BALANCE" in assigned:
+                    balance = assigned["BALANCE"]
+
+            # ── Fallback Assignment for unmapped / tricky rows ──
+            if not assigned:
+                if len(nums) >= 3:
+                    withdrawal, deposit, balance = nums[-3], nums[-2], nums[-1]
+                    if deposit > 0:
+                        amount, txn_type = deposit, "CREDIT"
+                    else:
+                        amount, txn_type = withdrawal, "DEBIT"
+                elif len(nums) == 2:
+                    amount, balance = nums[0], nums[1]
+                    up_line = line.upper()
+                    if ' CR' in up_line or 'CR.' in up_line:
+                        txn_type = "CREDIT"
+                    elif ' DR' in up_line or 'DR.' in up_line:
+                        txn_type = "DEBIT"
+                    else:
+                        if last_balance is not None:
+                            txn_type = "CREDIT" if balance > last_balance else "DEBIT"
+                        else:
+                            txn_type = "DEBIT"
+                elif len(nums) == 1:
+                    amount = nums[0]
+                    up_line = line.upper()
+                    txn_type = "CREDIT" if (' CR' in up_line or 'CR.' in up_line) else "DEBIT"
+                else:
+                    continue
             if balance is not None:
                 last_balance = balance
                 
@@ -322,27 +412,43 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
             iso_date = parsed_date.isoformat() + "+00:00" if parsed_date else "2026-01-01T00:00:00+00:00"
             val_date = parsed_date.strftime("%Y-%m-%d")    if parsed_date else "2026-01-01"
             
-            # Simple keyword grouping logic
-            mode = "OTHERS"
-            narr_up = narration.upper()
-            if "UPI" in narr_up: mode = "UPI"
-            elif "NEFT" in narr_up: mode = "NEFT"
-            elif "IMPS" in narr_up: mode = "IMPS"
-            elif "RTGS" in narr_up: mode = "RTGS"
-            elif "ATM" in narr_up or "CASH" in narr_up: mode = "ATM"
-            elif "CARD" in narr_up or "POS" in narr_up: mode = "CARD"
-            
             transactions.append({
                 "txnId": str(uuid.uuid4()),
                 "transactionTimestamp": iso_date,
                 "valueDate": val_date,
                 "amount": amount,
                 "type": txn_type,
-                "mode": mode,
-                "narration": narration or "Offline Transaction",
+                "mode": "OTHERS",
+                "narration": narration,
                 "reference": None,
                 "currentBalance": balance
             })
+        else:
+            # Multi-line narration handling for wrapped rows
+            if num_columns_order and transactions:
+                # Exclude common footer/header artifacts
+                if len(line) > 2 and not re.search(r'(?i)page\s+\d+|generated|opening balance|closing balance|statement|withdrawal|deposit', line):
+                    # Exclude lines that are purely numerical
+                    if not re.search(r'^\s*[\d,\.\-]+\s*$', line):
+                        # Clean up DR/CR tokens from overflow lines too just in case
+                        clean_line = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', line, flags=re.IGNORECASE).strip()
+                        if clean_line:
+                            transactions[-1]["narration"] = (transactions[-1]["narration"] + " " + clean_line).strip()
+
+    # Post-process narrations to assign modes and clean up empties
+    for t in transactions:
+        narr_up = t["narration"].upper()
+        mode = "OTHERS"
+        if "UPI" in narr_up: mode = "UPI"
+        elif "NEFT" in narr_up: mode = "NEFT"
+        elif "IMPS" in narr_up: mode = "IMPS"
+        elif "RTGS" in narr_up: mode = "RTGS"
+        elif "ATM" in narr_up or "CASH" in narr_up: mode = "ATM"
+        elif "CARD" in narr_up or "POS" in narr_up: mode = "CARD"
+        t["mode"] = mode
+        
+        if not t["narration"]:
+            t["narration"] = "Offline Transaction"
             
     # Extract Account number (regex match)
     acc_num = "XXXXXXXX0000"
@@ -374,7 +480,7 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str) -> Di
     }
 
 
-def _extract_text_from_file(file_bytes: bytes, filename: str) -> str:
+def _extract_text_from_file(file_bytes: bytes, filename: str, password: str = None) -> str:
     """Extract text from PDF or image file."""
     fname = filename.lower()
 
@@ -382,18 +488,28 @@ def _extract_text_from_file(file_bytes: bytes, filename: str) -> str:
         try:
             import pdfplumber
             import io
-            text = ""
-            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text() or ""
-                    text += page_text + "\n"
-            return text.strip()
+            
+            try:
+                text = ""
+                with pdfplumber.open(io.BytesIO(file_bytes), password=password or '') as pdf:
+                    for page in pdf.pages:
+                        page_text = page.extract_text() or ""
+                        text += page_text + "\n"
+                return text.strip()
+            except Exception as e:
+                err_str = repr(e) + repr(getattr(e, 'args', []))
+                if "PDFPasswordIncorrect" in err_str or "PDFEncryptionError" in err_str or "PdfminerException" in err_str:
+                    raise ValueError("encrypted_pdf")
+                raise
         except ImportError:
             # Fallback: try PyPDF2
             try:
                 import PyPDF2
                 import io
                 reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+                if reader.is_encrypted:
+                    if not password or not reader.decrypt(password):
+                        raise ValueError("encrypted_pdf")
                 return "\n".join(page.extract_text() or "" for page in reader.pages)
             except ImportError:
                 raise ValueError("Please install pdfplumber: pip install pdfplumber")
