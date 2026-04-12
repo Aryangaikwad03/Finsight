@@ -79,14 +79,12 @@ def get_connection():
 
 def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple:
     """
-    Returns (category, subcategory) based on mode and type.
-    mode:     UPI, NEFT, IMPS, FT, CARD, CASH, ATM, OTHERS
-    txn_type: CREDIT, DEBIT, INTEREST, TDS, OPENING, OTHERS, REDEMPTION, RENEWAL
+    Returns (category, subcategory) based on mode, type, and ML inference.
     """
     mode     = (mode or "").upper()
     txn_type = (txn_type or "").upper()
 
-    # Type-based (TD/RD specific — override mode classification)
+    # Type-based overrides (TD/RD specific)
     type_map = {
         "INTEREST":   ("Investment Returns", "Interest Income"),
         "TDS":        ("Tax",                "Tax Deducted at Source"),
@@ -97,7 +95,22 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
     if txn_type in type_map:
         return type_map[txn_type]
 
-    # Mode-based (DEPOSIT accounts)
+    # Route DEBITS and UNKNOWN items through the ML categorizer if narration exists
+    if txn_type == "DEBIT" and narration:
+        try:
+            from app.services.categorizer import categorize_transaction_ml
+            res = categorize_transaction_ml(narration)
+            
+            # If the ML model returns a specific semantic tag (not just generic Expense/Other)
+            has_valuable_sub = bool(res["subcategory"] and res["subcategory"].lower() != "other" and res["subcategory"].lower() != "expense")
+            
+            # Accept ML suggestion if it explicitly categorized it into our major buckets or found a specific subcategory
+            if res["category"] not in ("Other", "Expense") or has_valuable_sub:
+                return (res["category"], res["subcategory"].title()) # Title case for safe frontend display
+        except Exception as e:
+            logger.error("Failed to call ML categorizer: %s", e)
+
+    # Fallbacks based on static transaction Mode constants
     mode_map = {
         "UPI":    ("Digital Payments", "UPI Transfer"),
         "NEFT":   ("Bank Transfer",    "NEFT"),
@@ -114,7 +127,6 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
     }
     if mode in mode_map:
         cat, sub = mode_map[mode]
-        # Further refine by type
         if txn_type == "CREDIT":
             cat = cat if cat != "Cash" else "Cash"
             return (cat, sub + " (Credit)")
@@ -122,7 +134,7 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
             return (cat, sub + " (Debit)")
         return (cat, sub)
 
-    # Fallback
+    # Absolute final fallback
     if txn_type == "CREDIT":
         return ("Income", "Credit")
     if txn_type == "DEBIT":
@@ -597,7 +609,7 @@ def get_user_accounts(user_id: str) -> List[Dict]:
         cur.close(); conn.close()
 
 
-def get_user_transactions(user_id: str, limit: int = 500,
+def get_user_transactions(user_id: str, limit: int = None,
                           fi_data_ids: List[int] = None) -> List[Dict]:
     conn = get_connection()
     cur  = conn.cursor(cursor_factory=extras.RealDictCursor)
@@ -608,7 +620,11 @@ def get_user_transactions(user_id: str, limit: int = 500,
             conditions.append("t.fi_data_id = ANY(%s)")
             params.append(fi_data_ids)
         where = "WHERE " + " AND ".join(conditions)
-        params.append(limit)
+        
+        limit_sql = ""
+        if limit:
+            limit_sql = "LIMIT %s"
+            params.append(limit)
 
         cur.execute(f"""
             SELECT
@@ -622,7 +638,7 @@ def get_user_transactions(user_id: str, limit: int = 500,
             JOIN fi_data f ON t.fi_data_id = f.fi_data_id
             {where}
             ORDER BY t.txn_date DESC NULLS LAST
-            LIMIT %s
+            {limit_sql}
         """, params)
         return [dict(r) for r in cur.fetchall()]
     finally:

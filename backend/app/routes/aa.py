@@ -149,7 +149,7 @@ async def get_fi_data(
 
     try:
         accounts     = get_user_accounts(user_id)
-        transactions = get_user_transactions(user_id, limit=500)
+        transactions = get_user_transactions(user_id)
         summary      = get_user_summary(user_id)
         breakdown    = get_category_breakdown(user_id)
     except Exception as e:

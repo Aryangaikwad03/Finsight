@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import ConsentModal from '../components/ConsentModal'
 import { useAuth } from '../context/AuthContext'
-import { aaAPI } from '../services/api'
+import { aaAPI, pennyAPI } from '../services/api'
 
 // Fetch state machine: null → 'polling_consent' → 'fetching_data' → 'done' | 'error'
 export default function Consent() {
@@ -99,6 +99,38 @@ export default function Consent() {
     setFetchMsg('Re-fetching financial data...')
     setDataReady(false)
     await triggerDataFetch(consent.consent_id)
+  }
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0]
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+
+    setFetchPhase('fetching_data')
+    setFetchMsg(`Uploading & analyzing ${file.name} (this takes about 10-20 seconds)...`)
+    try {
+      const res = await pennyAPI.uploadStatement(formData)
+      setFetchPhase('done')
+      setFetchMsg(res.data.message || 'Statement uploaded and parsed successfully!')
+      setDataReady(true)
+      
+      // If we don't have an active UI consent block, fake one to show success
+      if (!consent) {
+        setConsent({
+          consent_id: res.data.consent_id,
+          status: 'ACTIVE',
+          consent_status: 'ACTIVE',
+          vua: 'Offline Statement'
+        })
+      }
+      setTimeout(() => navigate('/transactions'), 2000)
+    } catch (err) {
+      setFetchPhase('error')
+      setFetchMsg(err.response?.data?.detail || 'Failed to upload statement.')
+    } finally {
+      e.target.value = null
+    }
   }
 
   // ── Status helpers ─────────────────────────────────────────────────────────
@@ -234,6 +266,11 @@ export default function Consent() {
                 >
                   Revoke
                 </button>
+                <label className="text-xs px-3 py-1.5 rounded-full bg-brand-500/20 text-brand-300 hover:bg-brand-500/30 transition-colors cursor-pointer flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                  Upload Statement
+                  <input type="file" className="hidden" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileUpload} />
+                </label>
               </div>
             </div>
 
@@ -292,15 +329,25 @@ export default function Consent() {
                 </div>
               ))}
             </div>
-            <button
-              onClick={() => setShowModal(true)}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 text-white font-medium shadow-md hover:shadow-lg transition-all text-sm"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/>
-              </svg>
-              Create New Consent
-            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={() => setShowModal(true)}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-gradient-to-r from-brand-500 to-brand-700 text-white font-medium shadow-md hover:shadow-lg transition-all text-sm"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                Create New Consent
+              </button>
+              
+              <div className="text-slate-400 text-sm font-medium">OR</div>
+
+              <label className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-700 font-medium shadow-sm hover:bg-slate-50 transition-all text-sm cursor-pointer">
+                <svg className="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                Upload Offline Statement
+                <input type="file" className="hidden" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileUpload} />
+              </label>
+            </div>
           </div>
         )}
       </div>
