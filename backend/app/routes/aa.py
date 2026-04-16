@@ -382,18 +382,28 @@ async def get_categories(user: User = Depends(get_current_user)):
     conn = get_connection(); cur = conn.cursor(cursor_factory=_extras.RealDictCursor)
     try:
         # Built-in categories
+        # Built-in categories (20-category framework)
         builtin = [
-            {"category": "Digital Payments",   "subcategories": ["UPI Transfer", "UPI Transfer (Credit)", "UPI Transfer (Debit)"]},
-            {"category": "Bank Transfer",       "subcategories": ["NEFT", "IMPS", "Fund Transfer", "RTGS", "ECS/Auto Debit", "ACH", "NACH"]},
-            {"category": "Card",                "subcategories": ["Card Payment", "Card Payment (Credit)", "Card Payment (Debit)"]},
-            {"category": "Cash",                "subcategories": ["Cash Transaction", "ATM Withdrawal"]},
-            {"category": "Investment Returns",  "subcategories": ["Interest Income"]},
-            {"category": "Tax",                 "subcategories": ["Tax Deducted at Source"]},
-            {"category": "Account",             "subcategories": ["Account Opening"]},
-            {"category": "Investment",          "subcategories": ["Redemption", "Renewal"]},
-            {"category": "Income",              "subcategories": ["Credit", "Salary", "Bonus", "Dividend"]},
-            {"category": "Expense",             "subcategories": ["Debit", "Utilities", "Groceries", "Food", "Shopping", "Travel", "Healthcare", "Entertainment", "Rent"]},
-            {"category": "Other",               "subcategories": ["Other"]},
+            {"category": "Food & Dining", "subcategories": ["Restaurants/Cafe", "Groceries"]},
+            {"category": "Transportation", "subcategories": ["Fuel", "Taxi/Ride Hailing", "Public Transport"]},
+            {"category": "Shopping & Retail", "subcategories": ["E-commerce", "Clothing & Fashion", "Electronics"]},
+            {"category": "Bills & Utilities", "subcategories": ["Utilities/BillPay"]},
+            {"category": "Housing & Rent", "subcategories": ["Rent/Maintenance"]},
+            {"category": "Healthcare & Medical", "subcategories": ["Medical/Healthcare"]},
+            {"category": "Entertainment & Leisure", "subcategories": ["Sub/Movies/Events"]},
+            {"category": "Travel", "subcategories": ["Hotel/Flight"]},
+            {"category": "Education", "subcategories": ["Education/Fees"]},
+            {"category": "Investments & Savings", "subcategories": ["Investments", "Interest Income", "Redemption", "Renewal"]},
+            {"category": "Insurance", "subcategories": ["Insurance Premium"]},
+            {"category": "Salary & Income", "subcategories": ["Salary/Payroll", "Refund/Cashback", "Freelance/Bonus", "Credit"]},
+            {"category": "Transfers", "subcategories": ["Transfers", "UPI", "NEFT", "IMPS", "Fund Transfer", "RTGS", "Card Payment", "ACH", "NACH"]},
+            {"category": "Taxes & Government", "subcategories": ["Tax/Govt Fees", "Tax Deducted at Source"]},
+            {"category": "ATM / Cash Withdrawal", "subcategories": ["Cash Transaction", "Cash", "ATM"]},
+            {"category": "Fees & Charges", "subcategories": ["Bank Fees/Penalty"]},
+            {"category": "Donations & Charity", "subcategories": ["Donations"]},
+            {"category": "Business / Professional Expenses", "subcategories": ["Business/Professional"]},
+            {"category": "Subscription Services", "subcategories": ["Subscriptions"]},
+            {"category": "Uncategorized / Unknown", "subcategories": ["Debit", "Other"]},
         ]
         # Also fetch any custom categories this user has created
         cur.execute("""

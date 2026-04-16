@@ -29,10 +29,26 @@ const txnTypeBadge = (type) => {
 
 const categoryIcon = (cat) => {
   const icons = {
-    'Digital Payments': '📱', 'Bank Transfer': '🏦', 'Card': '💳',
-    'Cash': '💵', 'Investment Returns': '📈', 'Tax': '🧾',
-    'Account': '🏛️', 'Investment': '💰', 'Income': '⬆️',
-    'Expense': '⬇️', 'Other': '🔹',
+    'Food & Dining': '🍴',
+    'Transportation': '🚗',
+    'Shopping & Retail': '🛒',
+    'Bills & Utilities': '🧾',
+    'Housing & Rent': '🏠',
+    'Healthcare & Medical': '🏥',
+    'Entertainment & Leisure': '🍿',
+    'Travel': '✈️',
+    'Education': '🎓',
+    'Investments & Savings': '💰',
+    'Insurance': '🛡️',
+    'Salary & Income': '💵',
+    'Transfers': '🔄',
+    'Taxes & Government': '🏛️',
+    'ATM / Cash Withdrawal': '🏧',
+    'Fees & Charges': '⚠️',
+    'Donations & Charity': '🎗️',
+    'Business / Professional Expenses': '💼',
+    'Subscription Services': '🔄',
+    'Uncategorized / Unknown': '🔹',
   }
   return icons[cat] ?? '🔹'
 }

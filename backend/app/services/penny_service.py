@@ -17,13 +17,15 @@ logger = logging.getLogger("finsight.penny")
 
 def _groq_client():
     from groq import Groq
-    return Groq(api_key=os.getenv("GROQ_API_KEY", "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"))
+    from app.core.config import get_settings
+    settings = get_settings()
+    return Groq(api_key=settings.GROQ_API_KEY)
 
 
-def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024) -> str:
+def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024, model: str = "llama-3.1-8b-instant") -> str:
     client = _groq_client()
     resp   = client.chat.completions.create(
-        model       = "llama-3.1-8b-instant",
+        model       = model,
         messages    = messages,
         temperature = temperature,
         max_tokens  = max_tokens,
@@ -35,10 +37,9 @@ def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024)
 
 def _pinecone_index():
     from pinecone import Pinecone
-    pc = Pinecone(api_key=os.getenv(
-        "PINECONE_API_KEY",
-        "pcsk77ikBa_AxxLzJKoFmFXurBYeh9zjp24qYP9BCyTmBaTGGWMoU713Mem5vW4sLvZRMFRkJp"
-    ))
+    from app.core.config import get_settings
+    settings = get_settings()
+    pc = Pinecone(api_key=settings.PINECONE_API_KEY)
     index_name = "finsight-penny"
     existing   = [i.name for i in pc.list_indexes()]
     if index_name not in existing:
@@ -234,6 +235,7 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
     """
     Parse a bank statement PDF/CSV/Excel deterministically via heuristics.
     Bypasses LLM tokens/TPM limits completely for 100x speedup.
+    Restored to 'raw scan' regex mode as requested.
     """
     import re
     import uuid
@@ -267,13 +269,12 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
         if not line:
             continue
             
-        # Detect headers dynamically if not found
+        # Detect headers dynamically
         if not num_columns_order:
             line_lower = line.lower()
             pos = {}
             for key, aliases in HEADER_MAP.items():
                 for alias in aliases:
-                    # Match word boundary for safety
                     if re.search(r'\b' + re.escape(alias) + r'\b', line_lower):
                         pos[key] = line_lower.find(alias)
                         break
@@ -288,16 +289,11 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
             raw_date = date_match.group(1).strip()
             rest_of_line = line[date_match.end():].strip()
             
-            # Find all numbers like 1,234.56 or 1234.56
             num_matches = list(re.finditer(r'(?:^|\s)((?:\d{1,3}(?:,\d{2,3})+|\d+)\.\d{2})(?=\s|$|[A-Za-z])', rest_of_line))
-            
             if not num_matches:
                 continue
                 
             first_num_start = num_matches[0].start()
-            
-            # Piece together the remaining text chunks that are NOT part of the monetary amounts
-            # By skipping the numerical blocks, we effectively extract pure description regardless of column order
             narr_parts = []
             last_end = 0
             for match in num_matches:
@@ -306,178 +302,125 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
             narr_parts.append(rest_of_line[last_end:])
             
             narration = " ".join(narr_parts)
-            # Remove isolated DR/CR tokens and collapse whitespaces
             narration = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', narration, flags=re.IGNORECASE)
             narration = re.sub(r'\s+', ' ', narration).strip()
             
-            # Remove commas and convert to float
             nums = [float(m.group(1).replace(',', '')) for m in num_matches]
-            
             amount = 0.0
             txn_type = "DEBIT"
             balance = None
             
-            # ── Dynamic Header-Based Assignment ──
             assigned = {}
-            if num_columns_order and len(nums) <= len(num_columns_order) and len(nums) > 0:
+            if num_columns_order and 0 < len(nums) <= len(num_columns_order):
                 if len(nums) == len(num_columns_order):
                     assigned = {k: v for k, v in zip(num_columns_order, nums)}
                 elif len(nums) == len(num_columns_order) - 1 and "BALANCE" in num_columns_order:
-                    # Missing one (usually DEBIT or CREDIT were empty spaces)
                     assigned["BALANCE"] = nums[-1]
                     remaining_num = nums[0]
-                    
-                    # 1. Math heuristic (100% accurate if last_balance is known)
                     if last_balance is not None:
-                        if abs(last_balance - remaining_num - assigned["BALANCE"]) < 0.1:
-                            assigned["DEBIT"] = remaining_num
-                        elif abs(last_balance + remaining_num - assigned["BALANCE"]) < 0.1:
-                            assigned["CREDIT"] = remaining_num
-                            
-                    # 2. Text flag flags
+                        if abs(last_balance - remaining_num - assigned["BALANCE"]) < 0.1: assigned["DEBIT"] = remaining_num
+                        elif abs(last_balance + remaining_num - assigned["BALANCE"]) < 0.1: assigned["CREDIT"] = remaining_num
+                    
                     if "DEBIT" not in assigned and "CREDIT" not in assigned:
                         up_line = line.upper()
-                        if ' CR' in up_line or 'CR.' in up_line or '(CR)' in up_line:
-                            assigned["CREDIT"] = remaining_num
-                        elif ' DR' in up_line or 'DR.' in up_line or '(DR)' in up_line:
-                            assigned["DEBIT"] = remaining_num
-                            
-                    # 3. Last resort: Character Offset Proximity 
-                    if "DEBIT" not in assigned and "CREDIT" not in assigned:
-                        if "DEBIT" in header_offsets and "CREDIT" in header_offsets:
-                            num_abs_pos = date_match.end() + first_num_start
-                            if abs(num_abs_pos - header_offsets["DEBIT"]) < abs(num_abs_pos - header_offsets["CREDIT"]):
-                                assigned["DEBIT"] = remaining_num
-                            else:
-                                assigned["CREDIT"] = remaining_num
-                        else:
-                            assigned["DEBIT"] = remaining_num # Universal default
-                elif "AMOUNT" in num_columns_order and len(nums) == 1:
-                    assigned["AMOUNT"] = nums[0]
+                        if ' CR' in up_line or 'CR.' in up_line: assigned["CREDIT"] = remaining_num
+                        else: assigned["DEBIT"] = remaining_num
 
                 if "AMOUNT" in assigned:
                     amount = assigned["AMOUNT"]
-                    up_line = line.upper()
-                    txn_type = "CREDIT" if (' CR' in up_line or 'CR.' in up_line or '(CR)' in up_line) else "DEBIT"
+                    txn_type = "CREDIT" if ' CR' in line.upper() else "DEBIT"
                 else:
-                    if "CREDIT" in assigned and assigned["CREDIT"] > 0:
-                        amount = assigned["CREDIT"]
-                        txn_type = "CREDIT"
-                    elif "DEBIT" in assigned and assigned.get("DEBIT", 0) >= 0:
-                        amount = assigned["DEBIT"]
-                        txn_type = "DEBIT"
+                    if "CREDIT" in assigned and assigned["CREDIT"] > 0: amount, txn_type = assigned["CREDIT"], "CREDIT"
+                    else: amount, txn_type = assigned.get("DEBIT", 0), "DEBIT"
+                balance = assigned.get("BALANCE")
 
-                if "BALANCE" in assigned:
-                    balance = assigned["BALANCE"]
-
-            # ── Fallback Assignment for unmapped / tricky rows ──
-            if not assigned:
-                if len(nums) >= 3:
-                    withdrawal, deposit, balance = nums[-3], nums[-2], nums[-1]
-                    if deposit > 0:
-                        amount, txn_type = deposit, "CREDIT"
-                    else:
-                        amount, txn_type = withdrawal, "DEBIT"
-                elif len(nums) == 2:
-                    amount, balance = nums[0], nums[1]
-                    up_line = line.upper()
-                    if ' CR' in up_line or 'CR.' in up_line:
-                        txn_type = "CREDIT"
-                    elif ' DR' in up_line or 'DR.' in up_line:
-                        txn_type = "DEBIT"
-                    else:
-                        if last_balance is not None:
-                            txn_type = "CREDIT" if balance > last_balance else "DEBIT"
-                        else:
-                            txn_type = "DEBIT"
-                elif len(nums) == 1:
-                    amount = nums[0]
-                    up_line = line.upper()
-                    txn_type = "CREDIT" if (' CR' in up_line or 'CR.' in up_line) else "DEBIT"
-                else:
-                    continue
-            if balance is not None:
-                last_balance = balance
+            if balance is not None: last_balance = balance
                 
-            # Date formatting (best effort)
             parsed_date = None
             d_clean = raw_date.replace('-', ' ').replace('/', ' ')
             for fmt in ("%d %m %Y", "%d %b %Y", "%d %B %Y", "%d %m %y", "%d %b %y"):
                 try:
                     parsed_date = datetime.strptime(d_clean, fmt)
                     break
-                except ValueError:
-                    pass
+                except : pass
                     
-            iso_date = parsed_date.isoformat() + "+00:00" if parsed_date else "2026-01-01T00:00:00+00:00"
-            val_date = parsed_date.strftime("%Y-%m-%d")    if parsed_date else "2026-01-01"
-            
             transactions.append({
                 "txnId": str(uuid.uuid4()),
-                "transactionTimestamp": iso_date,
-                "valueDate": val_date,
+                "transactionTimestamp": (parsed_date or datetime.now()).isoformat() + "+00:00",
+                "valueDate": (parsed_date or datetime.now()).strftime("%Y-%m-%d"),
                 "amount": amount,
                 "type": txn_type,
                 "mode": "OTHERS",
                 "narration": narration,
-                "reference": None,
                 "currentBalance": balance
             })
-        else:
-            # Multi-line narration handling for wrapped rows
-            if num_columns_order and transactions:
-                # Exclude common footer/header artifacts
-                if len(line) > 2 and not re.search(r'(?i)page\s+\d+|generated|opening balance|closing balance|statement|withdrawal|deposit', line):
-                    # Exclude lines that are purely numerical
-                    if not re.search(r'^\s*[\d,\.\-]+\s*$', line):
-                        # Clean up DR/CR tokens from overflow lines too just in case
-                        clean_line = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', line, flags=re.IGNORECASE).strip()
-                        if clean_line:
-                            transactions[-1]["narration"] = (transactions[-1]["narration"] + " " + clean_line).strip()
+        elif num_columns_order and transactions:
+            # Continuation row
+            if len(line) > 2 and not re.search(r'(?i)page|statement|opening balance|closing balance', line):
+                if not re.search(r'^\s*[\d,\.\-]+\s*$', line):
+                    clean_line = re.sub(r'\b(?:CR|DR)\b', '', line, flags=re.IGNORECASE).strip()
+                    if clean_line:
+                        transactions[-1]["narration"] = (transactions[-1]["narration"] + " " + clean_line).strip()
 
-    # Post-process narrations to assign modes and clean up empties
-    for t in transactions:
-        narr_up = t["narration"].upper()
-        mode = "OTHERS"
-        if "UPI" in narr_up: mode = "UPI"
-        elif "NEFT" in narr_up: mode = "NEFT"
-        elif "IMPS" in narr_up: mode = "IMPS"
-        elif "RTGS" in narr_up: mode = "RTGS"
-        elif "ATM" in narr_up or "CASH" in narr_up: mode = "ATM"
-        elif "CARD" in narr_up or "POS" in narr_up: mode = "CARD"
-        t["mode"] = mode
-        
-        if not t["narration"]:
-            t["narration"] = "Offline Transaction"
-            
-    # Extract Account number (regex match)
-    acc_num = "XXXXXXXX0000"
-    acc_match = re.search(r'(?:A/C No|Account No|A/c).*?(\d{6,})', text[:2000], re.IGNORECASE)
+    # --- Metadata Extraction (Bank Name & Acc Number) ---
+    bank_name = "Other Bank"
+    acc_num = "XXXX" + str(uuid.uuid4())[:4] # Default unique
+    
+    # Try to find bank name
+    header_text = text[:3000].upper()
+    if "AXIS" in header_text: bank_name = "Axis Bank"
+    elif "SBI" in header_text or "STATE BANK" in header_text: bank_name = "State Bank of India"
+    elif "HDFC" in header_text: bank_name = "HDFC Bank"
+    elif "ICICI" in header_text: bank_name = "ICICI Bank"
+    elif "PNB" in header_text or "PUNJAB NATIONAL" in header_text: bank_name = "Punjab National Bank"
+    elif "YES BANK" in header_text: bank_name = "YES Bank"
+    elif "KOTAK" in header_text: bank_name = "Kotak Mahindra"
+    
+    # Try to find account number
+    acc_match = re.search(r'(?:A/c No|Account No|A/c).*?(\d{8,})', header_text, re.IGNORECASE)
     if acc_match:
         full_acc = acc_match.group(1)
-        acc_num = "X" * max(0, len(full_acc) - 4) + full_acc[-4:]
-        
-    bank_name = "Offline Bank"
-    t_head = text[:800].upper()
-    if "HDFC" in t_head: bank_name = "HDFC Bank"
-    elif "SBI" in t_head or "STATE BANK" in t_head: bank_name = "SBI"
-    elif "ICICI" in t_head: bank_name = "ICICI Bank"
+        # We append a unique suffix (from filename/uuid) to ensure every UPLOAD is a separate account as requested
+        acc_num = "X" * (len(full_acc)-4) + full_acc[-4:] + "-" + str(uuid.uuid4())[:4]
+    else:
+        # If no acc number found, use filename hash to stay unique
+        import hashlib
+        f_hash = hashlib.md5(filename.encode()).hexdigest()[:4]
+        acc_num = f"STMT-{f_hash}-{str(uuid.uuid4())[:4]}"
 
-    logger.info("Heuristic parser found %d transactions", len(transactions))
+    logger.info("Restored heuristic parser found %d transactions for %s", len(transactions), bank_name)
     
     return {
-      "account_info": {
-        "bank_name": bank_name,
-        "account_number": acc_num,
-        "account_type": "DEPOSIT",
-        "holder_name": user_name,
-        "ifsc_code": None,
-        "branch": None,
-        "opening_balance": None,
-        "closing_balance": last_balance
-      },
-      "transactions": transactions
+        "account_info": {
+            "bank_name": bank_name,
+            "account_number": acc_num,
+            "account_type": "DEPOSIT",
+            "holder_name": user_name,
+            "closing_balance": last_balance
+        },
+        "transactions": transactions
     }
+
+def _parse_text_fallback_heuristics(text: str, user_name: str) -> Dict:
+    """Minimized heuristic parser for unstructured text blocks."""
+    import re
+    import uuid
+    from datetime import datetime
+    txns = []
+    lines = text.split('\n')
+    for line in lines:
+        date_m = re.search(r'(\d{1,2}[/\-\s]+[a-zA-Z]{3,4}[/\-\s]+\d{2,4})', line)
+        if date_m:
+            nums = re.findall(r'(\d+[\.,]\d{2})', line)
+            if nums:
+                txns.append({
+                    "txnId": str(uuid.uuid4()),
+                    "transactionTimestamp": "2026-01-01T00:00:00+00:00",
+                    "amount": float(nums[0].replace(',', '')),
+                    "type": "DEBIT",
+                    "narration": line.strip()
+                })
+    return {"account_info": {"holder_name": user_name}, "transactions": txns}
 
 
 def _extract_text_from_file(file_bytes: bytes, filename: str, password: str = None) -> str:
@@ -584,49 +527,103 @@ CATEGORY_PROMPT = """You are a financial transaction categorizer for Indian user
 Given these transactions, suggest the correct category for each.
 
 Available categories:
-- Digital Payments (UPI transfers)
-- Bank Transfer (NEFT, IMPS, RTGS, fund transfers)
-- Card (card payments)
-- Cash (ATM withdrawals, cash deposits)
-- Investment Returns (interest, dividends)
-- Tax (TDS, tax payments)
-- Account (opening, closing)
-- Investment (FD, RD, mutual funds)
-- Income (salary, freelance, business income)
-- Expense > Groceries
-- Expense > Food & Dining
-- Expense > Shopping
-- Expense > Travel
-- Expense > Healthcare
-- Expense > Entertainment
-- Expense > Utilities (electricity, water, gas)
-- Expense > Rent
-- Other
+- Food & Dining
+- Transportation
+- Shopping & Retail
+- Bills & Utilities
+- Housing & Rent
+- Healthcare & Medical
+- Entertainment & Leisure
+- Travel
+- Education
+- Investments & Savings
+- Insurance
+- Salary & Income
+- Transfers
+- Taxes & Government
+- ATM / Cash Withdrawal
+- Fees & Charges
+- Donations & Charity
+- Business / Professional Expenses
+- Subscription Services
+- Uncategorized / Unknown
 
 Return ONLY a JSON array:
 [{"txn_id": <id>, "category": "<category>", "subcategory": "<subcategory>", "confidence": 0.0-1.0}]"""
 
 
 def auto_categorize_transactions(transactions: List[Dict]) -> List[Dict]:
-    """Use LLM to suggest better categories for a batch of transactions."""
+    """Use LLM grouping and deduplication to intelligently batch-categorize hundreds of transactions."""
     if not transactions:
         return []
 
-    # Build a compact representation for the LLM
-    txn_text = "\n".join([
-        f"ID:{t.get('txn_id')} | {t.get('txn_type')} | {t.get('payment_mode')} | {(t.get('narration') or '')[:60]} | ₹{t.get('amount')}"
-        for t in transactions[:30]  # Process 30 at a time
-    ])
+    # 1. Deduplicate and clean text to massively reduce tokens and increase query speed
+    def clean_text(n: str) -> str:
+        # Remove 8+ digit IDs/numbers (e.g. UPI/123456789012)
+        s = re.sub(r'\d{7,}', '', n or '')
+        s = re.sub(r'[^A-Za-z0-9\s/&]', ' ', s)
+        return ' '.join(s.split()).strip()[:65]
 
-    messages = [
-        {"role": "system", "content": CATEGORY_PROMPT},
-        {"role": "user",   "content": f"Categorize these transactions:\n{txn_text}"}
-    ]
+    unique_txns = {} # clean_text -> list of txn_id
+    for t in transactions:
+        c_text = clean_text(t.get('narration'))
+        if not c_text:
+            continue
+        if c_text not in unique_txns:
+            unique_txns[c_text] = []
+        unique_txns[c_text].append(t.get('txn_id'))
 
-    try:
-        raw = _llm(messages, temperature=0.1, max_tokens=2048)
-        raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
-        return json.loads(raw)
-    except Exception as e:
-        logger.error("Auto-categorize failed: %s", e)
-        return []
+    all_suggestions = []
+    unique_keys = list(unique_txns.keys())
+    
+    # 2. Chunk in batches of 150 unique narrations to bypass Free-Tier RPM limit drastically
+    import time
+    chunk_size = 150
+    for i in range(0, len(unique_keys), chunk_size):
+        chunk_keys = unique_keys[i:i+chunk_size]
+        
+        txn_text = "\n".join([f"KEY_{idx}: {k}" for idx, k in enumerate(chunk_keys)])
+        
+        # Override the schema prompt dynamically for this batch logic
+        sys_prompt = CATEGORY_PROMPT.replace(
+            '[{"txn_id": <id>, "category": "<category>", "subcategory": "<subcategory>", "confidence": 0.0-1.0}]', 
+            '[{"key_id": "KEY_<number>", "category": "<category>", "subcategory": "<subcategory>", "confidence": 0.0-1.0}]'
+        )
+        
+        messages = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user",   "content": f"Categorize these unique parsed narrations ONLY. Return the JSON array.\n{txn_text}"}
+        ]
+
+        try:
+            # Reverted to default fast 8b-instant to dodge permission issues while keeping efficiency
+            raw = _llm(messages, temperature=0.1, max_tokens=3000, model="llama-3.1-8b-instant")
+            raw = re.sub(r"```(?:json)?", "", raw).strip().rstrip("```").strip()
+            suggestions = json.loads(raw)
+            
+            # 3. Unroll AI's mapped suggestions logically back against raw identical transactions
+            for s in suggestions:
+                k_id = s.get("key_id", str(s.get("txn_id", "")))
+                if k_id.startswith("KEY_"):
+                    try:
+                        idx = int(k_id.split("_")[1])
+                        c_text = chunk_keys[idx]
+                        orig_ids = unique_txns[c_text]
+                        for oid in orig_ids:
+                            all_suggestions.append({
+                                "txn_id": oid,
+                                "category": s.get("category"),
+                                "subcategory": s.get("subcategory"),
+                                "confidence": s.get("confidence", 0.9)
+                            })
+                    except Exception:
+                        pass
+                        
+            time.sleep(2.0)
+            
+        except Exception as e:
+            logger.error("Auto-categorize chunk failed: %s", e)
+            continue
+            
+    return all_suggestions
+

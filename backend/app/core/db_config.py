@@ -79,55 +79,233 @@ def get_connection():
 
 def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple:
     """
-    Returns (category, subcategory) based on mode, type, and ML inference.
+    Returns (category, subcategory) based on powerful fast local heuristic keyword matches.
+    Tailored for Indian and Global contexts.
     """
-    mode     = (mode or "").upper()
+    mode = (mode or "").upper()
     txn_type = (txn_type or "").upper()
+    n = (narration or "").upper()
 
-    # Type-based overrides (TD/RD specific)
+    # 1. High priority Keyword matching natively off the narration string
+    
+    # --- Income / Salary ---
+    if txn_type == "CREDIT":
+        if any(w in n for w in ["SALARY", "SAL ", "PAYROLL", "WAGE", "STIPEND", "BONUS"]):
+            return ("Salary & Income", "Salary/Payroll")
+        if any(w in n for w in ["REFUND", "CASHBACK", "REVERSAL", "REBATE", "CASH BACK"]):
+            return ("Salary & Income", "Refund/Cashback")
+        if any(w in n for w in ["FREELANCE", "CONSULTING", "INCENTIVE", "COMMISSION"]):
+            return ("Salary & Income", "Freelance/Bonus")
+
+    # --- Food & Dining ---
+    if any(w in n for w in [
+        "RESTAURANT", "CAFE", "COFFEE", "TEA", "STARBUCKS", "COSTA", "BARISTA", "MCDONALD", "KFC",
+        "BURGER KING", "DOMINO", "PIZZA HUT", "SUBWAY", "ZOMATO", "SWIGGY", "EATSURE", "UBEREATS",
+        "DOORDASH", "GRUBHUB", "DELIVEROO", "TALABAT", "FOODPANDA", "DINEOUT", "BBQ NATION",
+        "HALDIRAM", "CHAI POINT", "CHAAYOS", "CAFE COFFEE DAY", "CCD", "DUNKIN", "TACO BELL",
+        "NANDOS", "BAKERY", "BISTRO", "PUB", "LOUNGE", "DINER", "TAKEAWAY"
+    ]):
+        return ("Food & Dining", "Restaurants/Cafe")
+    
+    # --- Groceries ---
+    if any(w in n for w in [
+        "GROCERY", "SUPERMARKET", "KIRANA", "DMART", "RELIANCE FRESH", "BIG BAZAAR", "JIOMART",
+        "BLINKIT", "ZEPTO", "INSTAMART", "GROFERS", "AMAZON FRESH", "SPENCER", "MORE RETAIL",
+        "EASYDAY", "NATURE BASKET", "WALMART", "TESCO", "ALDI", "LIDL", "COSTCO", "WHOLE FOODS",
+        "TARGET GROCERY", "VEGETABLE", "FRUITS", "MILK", "DAIRY", "BB ", "GROCERS"
+    ]):
+        return ("Food & Dining", "Groceries")
+
+    # --- Transportation ---
+    if any(w in n for w in [
+        "PETROL", "DIESEL", "FUEL", "HPCL", "BPCL", "IOCL", "INDIAN OIL", "BHARAT PETROLEUM",
+        "HINDUSTAN PETROLEUM", "SHELL", "ESSAR", "NAYARA", "CHEVRON", "EXXON", "MOBIL", "TEXACO",
+        "GAS STATION"
+    ]):
+        return ("Transportation", "Fuel")
+    
+    if any(w in n for w in [
+        "UBER", "OLA", "RAPIDO", "LYFT", "GRAB", "CAREEM", "TAXI", "CAB", "AUTO", "RIDESHARE",
+        "TRANSIT", "METRO TAXI"
+    ]):
+        return ("Transportation", "Taxi/Ride Hailing")
+    
+    if any(w in n for w in [
+        "METRO", "RAIL", "TRAIN", "IRCTC", "REDBUS", "BUS", "PARKING", "TOLL", "FASTAG",
+        "NMMT", "BEST BUS", "DELHI METRO", "MUMBAI METRO", "OYSTER", "OCTOPUS"
+    ]):
+        return ("Transportation", "Public Transport")
+
+    # --- Shopping & Retail ---
+    if any(w in n for w in [
+        "AMAZON", "FLIPKART", "MYNTRA", "AJIO", "MEESHO", "NYKAA", "TATACLIQ", "SNAPDEAL",
+        "EBAY", "ETSY", "ALIEXPRESS", "TEMU", "SHEIN", "SHOPIFY"
+    ]):
+        return ("Shopping & Retail", "E-commerce")
+    
+    if any(w in n for w in [
+        "ZARA", "HM", "H&M", "LIFESTYLE", "PANTALOONS", "WESTSIDE", "TRENDS", "LEVIS", "NIKE",
+        "ADIDAS", "PUMA", "UNDER ARMOUR", "UNIQLO", "FOREVER21", "FASHION", "APPAREL", "GARMENT",
+        "FOOTWEAR", "SHOE STORE"
+    ]):
+        return ("Shopping & Retail", "Clothing & Fashion")
+    
+    if any(w in n for w in [
+        "CROMA", "RELIANCE DIGITAL", "VIJAY SALES", "APPLE", "SAMSUNG", "ONEPLUS", "XIAOMI",
+        "MI STORE", "BEST BUY", "MEDIAMARKT", "GADGET", "LAPTOP", "MOBILE", "PHONE", "TABLET", "APPLIANCE"
+    ]):
+        return ("Shopping & Retail", "Electronics")
+
+    # --- Bills & Utilities ---
+    if any(w in n for w in [
+        "ELECTRICITY", "WATER BILL", "GAS BILL", "INTERNET", "BROADBAND", "WIFI", "AIRTEL",
+        "JIO", "VODAFONE", "VI ", "BSNL", "TATA PLAY", "DISH TV", "DTH", "UTILITY", "POWER",
+        "TORRENT POWER", "ADANI ELECTRICITY", "BESCOM", "MSEB", "PGVCL", "BILLPAY", "RECHARGE"
+    ]):
+        return ("Bills & Utilities", "Utilities/BillPay")
+
+    # --- Housing & Rent ---
+    if any(w in n for w in [
+        "RENT", "HOUSE RENT", "LANDLORD", "LEASE", "MAINTENANCE", "SOCIETY MAINTENANCE",
+        "APARTMENT MAINTENANCE", "HOUSING", "PROPERTY TAX", "MORTGAGE", "HOME LOAN", "NESTAWAY",
+        "NO BROKER", "BROKER FEE"
+    ]):
+        return ("Housing & Rent", "Rent/Maintenance")
+
+    # --- Healthcare & Medical ---
+    if any(w in n for w in [
+        "HOSPITAL", "CLINIC", "PHARMACY", "CHEMIST", "APOLLO", "PRACTO", "NETMEDS", "1MG",
+        "TATA 1MG", "MEDPLUS", "WELLNESS", "DOCTOR", "DENTIST", "PATHOLOGY", "DIAGNOSTIC",
+        "LAB TEST", "HEALTHCARE", "MEDICAL"
+    ]):
+        return ("Healthcare & Medical", "Medical/Healthcare")
+
+    # --- Entertainment & Leisure ---
+    if any(w in n for w in [
+        "NETFLIX", "PRIME VIDEO", "AMAZON PRIME", "DISNEY", "HOTSTAR", "SPOTIFY", "YOUTUBE PREMIUM",
+        "GAANA", "WYNK", "JIOSAAVN", "MOVIE", "CINEMA", "PVR", "INOX", "BOOKMYSHOW", "GAMING",
+        "STEAM", "PLAYSTATION", "XBOX", "NINTENDO", "HOBBY", "EVENT", "AMUSEMENT"
+    ]):
+        return ("Entertainment & Leisure", "Sub/Movies/Events")
+
+    # --- Travel ---
+    if any(w in n for w in [
+        "HOTEL", "FLIGHT", "AIRLINE", "INDIGO", "AIR INDIA", "VISTARA", "SPICEJET", "EMIRATES",
+        "QATAR AIRWAYS", "BRITISH AIRWAYS", "BOOKING.COM", "AGODA", "EXPEDIA", "trip.com",
+        "MAKEYMYTRIP", "YATRA", "CLEARTRIP", "HOSTEL", "RESORT", "TOURISM"
+    ]):
+        return ("Travel", "Hotel/Flight")
+
+    # --- Education ---
+    if any(w in n for w in [
+        "SCHOOL", "COLLEGE", "TUITION", "COACHING", "BYJU", "UNACADEMY", "COURSERA", "UDEMY",
+        "EDX", "UPGRAD", "SIMPLILEARN", "SKILLSHARE", "FEES", "EXAM FEE", "CERTIFICATION", "TRAINING"
+    ]):
+        return ("Education", "Education/Fees")
+
+    # --- Investments & Savings ---
+    if any(w in n for w in [
+        "MUTUAL FUND", "SIP", "ZERODHA", "GROWW", "UPSTOX", "ANGEL ONE", "COIN", "STOCK", "SHARE",
+        "DEMAT", "DIVIDEND", "BOND", "FD ", "FIXED DEPOSIT", "RECURRING DEPOSIT", "RD ", "PPF",
+        "NPS", "INVESTMENT", "CRYPTO", "BITCOIN", "COINBASE", "BINANCE", "ETF", "KITE"
+    ]):
+        return ("Investments & Savings", "Investments")
+
+    # --- Insurance ---
+    if any(w in n for w in [
+        "INSURANCE", "LIC ", "HDFC ERGO", "ICICI LOMBARD", "STAR HEALTH", "MAX BUPA",
+        "POLICY PREMIUM", "MEDICLAIM", "TERM INSURANCE", "LIFE INSURANCE"
+    ]):
+        return ("Insurance", "Insurance Premium")
+
+    # --- Transfers ---
+    if any(w in n for w in [
+        "UPI", "NEFT", "RTGS", "IMPS", "TRANSFER", "BANK TRANSFER", "SELF TRANSFER",
+        "WALLET TRANSFER", "PAYTM WALLET", "PHONEPE", "GPAY", "GOOGLE PAY", "VENMO", "PAYPAL",
+        "CASH APP", "ZELLE", "REMITLY", "WISE", "WESTERN UNION"
+    ]):
+        return ("Transfers", "Transfers")
+
+    # --- Taxes & Government ---
+    if any(w in n for w in [
+        "GST", "INCOME TAX", "TDS", "CHALLAN", "EPFO", "PF CONTRIBUTION", "ESIC",
+        "GOVERNMENT FEE", "PASSPORT", "VISA", "MUNICIPAL TAX", "PROPERTY TAX", "COURT FEE",
+        "PENALTY", "TRAFFIC FINE"
+    ]):
+        return ("Taxes & Government", "Tax/Govt Fees")
+
+    # --- ATM / Cash Withdrawal ---
+    if any(w in n for w in [
+        "ATM", "CASH WITHDRAWAL", "CASH DEPOSIT", "BRANCH CASH", "WITHDRAWAL", "DEPOSIT", "CASH TXN"
+    ]):
+        return ("ATM / Cash Withdrawal", "Cash Transaction")
+
+    # --- Fees & Charges ---
+    if any(w in n for w in [
+        "PROCESSING FEE", "LATE FEE", "BANK CHARGE", "ANNUAL FEE", "JOINING FEE",
+        "CONVENIENCE FEE", "SERVICE CHARGE", "OVERDRAFT FEE", "INTEREST CHARGE"
+    ]):
+        return ("Fees & Charges", "Bank Fees/Penalty")
+
+    # --- Donations & Charity ---
+    if any(w in n for w in [
+        "DONATION", "CHARITY", "NGO", "TEMPLE", "CHURCH", "MOSQUE", "GURUDWARA", "TRUST",
+        "FUNDRAISER", "RELIEF FUND", "CROWDFUNDING"
+    ]):
+        return ("Donations & Charity", "Donations")
+
+    # --- Business / Professional Expenses ---
+    if any(w in n for w in [
+        "OFFICE SUPPLIES", "SOFTWARE", "SAAS", "ZOOM", "SLACK", "NOTION", "ADOBE", "MICROSOFT",
+        "AWS", "GOOGLE CLOUD", "HOSTING", "DOMAIN", "COWORKING", "STATIONERY", "PRINTING",
+        "COURIER", "LOGISTICS"
+    ]):
+        return ("Business / Professional Expenses", "Business/Professional")
+
+    # --- Subscription Services ---
+    if any(w in n for w in [
+        "SUBSCRIPTION", "MONTHLY PLAN", "ANNUAL PLAN", "RECURRING PAYMENT", "AUTO DEBIT",
+        "RENEWAL", "MEMBERSHIP", "GYM MEMBERSHIP"
+    ]):
+        return ("Subscription Services", "Subscriptions")
+
+    # 2. Type-based overrides (TD/RD specific)
     type_map = {
-        "INTEREST":   ("Investment Returns", "Interest Income"),
-        "TDS":        ("Tax",                "Tax Deducted at Source"),
-        "OPENING":    ("Account",            "Account Opening"),
-        "REDEMPTION": ("Investment",         "Redemption"),
-        "RENEWAL":    ("Investment",         "Renewal"),
+        "INTEREST":   ("Investments & Savings", "Interest Income"),
+        "TDS":        ("Taxes & Government",    "Tax Deducted at Source"),
+        "OPENING":    ("Account",               "Account Opening"),
+        "REDEMPTION": ("Investments & Savings", "Redemption"),
+        "RENEWAL":    ("Investments & Savings", "Renewal"),
     }
     if txn_type in type_map:
         return type_map[txn_type]
 
-    # Route DEBITS and UNKNOWN items through the ML categorizer if narration exists
-    # (ML categorizer has been disabled as per user request to remove mitulshah model dependency)
-
-    # Fallbacks based on static transaction Mode constants
+    # 3. Mode fallbacks
     mode_map = {
-        "UPI":    ("Digital Payments", "UPI Transfer"),
-        "NEFT":   ("Bank Transfer",    "NEFT"),
-        "IMPS":   ("Bank Transfer",    "IMPS"),
-        "FT":     ("Bank Transfer",    "Fund Transfer"),
-        "RTGS":   ("Bank Transfer",    "RTGS"),
-        "CARD":   ("Card",             "Card Payment"),
-        "CASH":   ("Cash",             "Cash Transaction"),
-        "ATM":    ("Cash",             "ATM Withdrawal"),
-        "ECS":    ("Bank Transfer",    "ECS/Auto Debit"),
-        "SI":     ("Bank Transfer",    "Standing Instruction"),
-        "ACH":    ("Bank Transfer",    "ACH"),
-        "NACH":   ("Bank Transfer",    "NACH"),
+        "UPI":    ("Transfers", "UPI"),
+        "NEFT":   ("Transfers", "NEFT"),
+        "IMPS":   ("Transfers", "IMPS"),
+        "FT":     ("Transfers", "Fund Transfer"),
+        "RTGS":   ("Transfers", "RTGS"),
+        "CARD":   ("Transfers", "Card Payment"),
+        "CASH":   ("ATM / Cash Withdrawal", "Cash"),
+        "ATM":    ("ATM / Cash Withdrawal", "ATM"),
+        "ECS":    ("Bills & Utilities", "ECS/Auto Debit"),
+        "SI":     ("Bills & Utilities", "Standing Instruction"),
+        "ACH":    ("Transfers", "ACH"),
+        "NACH":   ("Transfers", "NACH"),
     }
     if mode in mode_map:
         cat, sub = mode_map[mode]
-        if txn_type == "CREDIT":
-            cat = cat if cat != "Cash" else "Cash"
-            return (cat, sub + " (Credit)")
-        elif txn_type == "DEBIT":
-            return (cat, sub + " (Debit)")
         return (cat, sub)
 
-    # Absolute final fallback
+    # 4. Final fallback
     if txn_type == "CREDIT":
-        return ("Income", "Credit")
+        return ("Salary & Income", "Credit")
     if txn_type == "DEBIT":
-        return ("Expense", "Debit")
-    return ("Other", "Other")
+        return ("Uncategorized / Unknown", "Debit")
+    
+    return ("Uncategorized / Unknown", "Other")
 
 
 def init_database():

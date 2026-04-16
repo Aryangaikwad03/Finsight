@@ -3,7 +3,6 @@ app/routes/penny.py — Penny AI Assistant endpoints
 """
 import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from typing import List, Optional
