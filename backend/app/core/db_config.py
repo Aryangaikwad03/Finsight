@@ -523,8 +523,8 @@ def save_fi_data(session_id: str, user_id: str, consent_id: str, parsed_data: Di
                     cat, sub  = classify_transaction(mode, txn_type, narration)
 
                     # Parse both timestamp fields — handles all AA date formats
-                    txn_date   = _parse_dt(txn.get("transactionTimestamp"))
-                    value_date = _parse_dt(txn.get("valueDate"))
+                    txn_date   = _parse_dt(txn.get("transactionTimestamp") or txn.get("date"))
+                    value_date = _parse_dt(txn.get("valueDate") or txn.get("date"))
                     # Fallback: use whichever is available
                     if txn_date is None:
                         txn_date = value_date

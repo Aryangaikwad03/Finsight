@@ -205,7 +205,7 @@ def _extract_transactions(account: Dict, fi_type: str) -> List[Dict]:
             "mode":      t.get("mode"),      # UPI / NEFT / IMPS …
             "narration": t.get("narration"),
             "reference": t.get("reference"),
-            "balance":   t.get("currentBalance"),
+            "balance":   t.get("balance") or t.get("currentBalance"),
         }
         # Extra fields for equities / MF
         if fi_type == "EQUITIES":
