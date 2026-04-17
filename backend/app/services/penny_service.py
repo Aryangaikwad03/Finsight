@@ -282,11 +282,14 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
 
     # Detect if this is a piped structured format (from CSV/Excel)
     is_piped = False
-    if lines:
-        for l in lines[:100]: # Check more lines for tabular structure
-            if "|" in l:
-                is_piped = True
-                break
+    fname_lower = filename.lower()
+    if fname_lower.endswith(('.csv', '.xls', '.xlsx')):
+        is_piped = True
+    elif lines and not fname_lower.endswith('.pdf'):
+        # Only check for pipes if it's not a PDF, to avoid false positives
+        pipe_lines = sum(1 for l in lines[:20] if "|" in l)
+        if pipe_lines > 3:
+            is_piped = True
 
     # Heuristic Regex: Match dates like 01/12/2026, 01-Mar-2026, 01 Mar 26
     date_regex = re.compile(r'^\s*(\d{1,2}[/\-\s]+(?:[a-zA-Z]{3,4}|\d{1,2})[/\-\s]+\d{2,4})')
@@ -315,7 +318,7 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
                                 break
                         if key in pos: break
                     else:
-                        if re.search(r'\b' + re.escape(alias) + r'\b', line_lower):
+                        if re.search(r'(?:^|\s|\b)' + re.escape(alias) + r'(?:$|\s|\b)', line_lower):
                             pos[key] = line_lower.find(alias)
                             break
             
@@ -422,6 +425,24 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
                         if "CREDIT" in assigned and assigned["CREDIT"] > 0: amount, txn_type = assigned["CREDIT"], "CREDIT"
                         else: amount, txn_type = assigned.get("DEBIT", 0), "DEBIT"
                     balance = assigned.get("BALANCE")
+
+                if amount == 0 and len(nums) > 0:
+                    if len(nums) >= 2:
+                        balance = nums[-1]
+                        amount = nums[-2]
+                        if last_balance is not None:
+                            if abs(last_balance - amount - balance) < 0.1:
+                                txn_type = "DEBIT"
+                            elif abs(last_balance + amount - balance) < 0.1:
+                                txn_type = "CREDIT"
+                            else:
+                                txn_type = "CREDIT" if ' CR' in line.upper() or 'CR.' in line.upper() else "DEBIT"
+                        else:
+                            txn_type = "CREDIT" if ' CR' in line.upper() or 'CR.' in line.upper() else "DEBIT"
+                    else:
+                        amount = nums[0]
+                        txn_type = "CREDIT" if ' CR' in line.upper() or 'CR.' in line.upper() else "DEBIT"
+                        balance = None
 
                 if balance is not None: last_balance = balance
                     
