@@ -637,3 +637,129 @@ def get_category_drilldown(user_id: str, category: str, month: int = None, year:
         return {"drilldown": res}
     finally:
         cur.close(); conn.close()
+
+
+def get_six_month_trend(user_id: str) -> list[dict]:
+    """Calculate the total income and expense bucketing for the last 6 months."""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        income_types = ('CREDIT','INTEREST','OPENING','REFUND','DEPOSIT','INWARD','REVERSAL')
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD','FEES','CHARGES','TAX','OTHERS')
+        
+        query = """
+            SELECT 
+                TO_CHAR(txn_date, 'YYYY-MM') as month,
+                SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) AS total_income,
+                SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) AS total_expenses
+            FROM transactions
+            WHERE user_id = %s
+              AND txn_date >= DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '5 months'
+            GROUP BY TO_CHAR(txn_date, 'YYYY-MM')
+            ORDER BY month ASC
+        """
+        cur.execute(query, (income_types, expense_types, user_id))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("Error fetching 6-month trend: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_top_merchants(user_id: str, month: int = None, year: int = None, limit: int = 15) -> list[dict]:
+    """Group by exact narration to find top spending destinations."""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD','FEES','CHARGES','TAX','OTHERS')
+        query = """
+            SELECT
+                SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30) as merchant,
+                COUNT(*) as txn_count,
+                SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) AS spent
+            FROM transactions
+            WHERE user_id = %s AND amount > 0 AND txn_type IN %s
+        """
+        params = [expense_types, user_id, expense_types]
+        if month and year:
+            query += " AND EXTRACT(MONTH FROM txn_date) = %s AND EXTRACT(YEAR FROM txn_date) = %s"
+            params.extend([month, year])
+            
+        query += " GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30) HAVING SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) > 0"
+        params.insert(0, expense_types) # Since we use expense_types again in the HAVING
+        query += " ORDER BY spent DESC LIMIT %s"
+        params.append(limit)
+        
+        cur.execute(query, tuple(params))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("Error fetching top merchants: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_user_budgets(user_id: str) -> list[dict]:
+    """Fetch active SPENDING_LIMIT and SAVINGS_GOAL targets from financial_goals table"""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT goal_type, title, category, target_amount, period, status
+            FROM financial_goals
+            WHERE user_id = %s::uuid AND status = 'ACTIVE'
+        """, (user_id,))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.warning("Error fetching financial goals (or table missing): %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_recurring_expenses(user_id: str) -> list[dict]:
+    """Isolate subscriptions/EMIs by finding identical payments across distinct months."""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD','FEES','CHARGES','TAX','OTHERS')
+        
+        query = """
+            SELECT 
+                SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30) as merchant,
+                ROUND(AVG(amount), 2) as avg_amount,
+                COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) as months_active
+            FROM transactions
+            WHERE user_id = %s AND amount > 0 AND txn_type IN %s
+            GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30)
+            HAVING COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) >= 2 
+               AND (MAX(amount) - MIN(amount)) / NULLIF(AVG(amount), 0) < 0.1
+            ORDER BY avg_amount DESC LIMIT 10
+        """
+        cur.execute(query, (user_id, expense_types))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("Error fetching recurring: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_largest_transactions(user_id: str, limit: int = 5) -> list[dict]:
+    """Fetch absolute largest outlier expenses of the current month."""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD','FEES','CHARGES','TAX','OTHERS')
+        query = """
+            SELECT txn_date, amount, category, narration
+            FROM transactions
+            WHERE user_id = %s AND txn_type IN %s 
+              AND txn_date >= DATE_TRUNC('month', CURRENT_DATE)
+            ORDER BY amount DESC LIMIT %s
+        """
+        cur.execute(query, (user_id, expense_types, limit))
+        return [dict(r) for r in cur.fetchall()]
+    except Exception as e:
+        logger.error("Error fetching largest txns: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+

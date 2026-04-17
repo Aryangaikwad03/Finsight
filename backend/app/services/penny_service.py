@@ -22,7 +22,7 @@ def _groq_client():
     return Groq(api_key=settings.GROQ_API_KEY)
 
 
-def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024, model: str = "llama-3.1-8b-instant") -> str:
+def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024, model: str = "llama-3.3-70b-versatile") -> str:
     client = _groq_client()
     resp   = client.chat.completions.create(
         model       = model,
@@ -85,14 +85,23 @@ def build_user_context(user_id: str, user_name: str) -> str:
     """
     from app.core.db_config import (
         get_user_accounts, get_user_transactions,
-        get_user_summary, get_category_breakdown
+        get_user_summary, get_category_breakdown,
+        get_top_merchants, get_user_budgets,
+        get_six_month_trend, get_recurring_expenses, get_largest_transactions
     )
+    import calendar
+    from datetime import datetime
 
     try:
         accounts     = get_user_accounts(user_id)
         transactions = get_user_transactions(user_id, limit=200)
         summary      = get_user_summary(user_id)
         breakdown    = get_category_breakdown(user_id)
+        merchants    = get_top_merchants(user_id, limit=10)
+        budgets      = get_user_budgets(user_id)
+        trend        = get_six_month_trend(user_id)
+        recurring    = get_recurring_expenses(user_id)
+        anomalies    = get_largest_transactions(user_id, limit=5)
     except Exception as e:
         logger.error("Context build failed: %s", e)
         return f"User: {user_name}. Financial data unavailable."
@@ -104,10 +113,23 @@ def build_user_context(user_id: str, user_name: str) -> str:
     acc_count  = summary.get("account_count", 0)
     net        = income - expenses
 
-    ctx = f"""You are Penny, a friendly and expert personal finance AI assistant for FinSight.
-You are talking to {user_name}. Always use their real financial data in your answers.
-CRITICAL INSTRUCTION: If the user asks about goal tracking (e.g., "I want to save 50k for a vacation, how much time will it take?"), explicitly calculate the timeline in months by dividing their goal amount by their Net Average Monthly Savings capacity (Total Income - Total Expenses). If their Net Flow is negative, advise them they need to reduce expenses first.
-Be concise, warm, and actionable. Use ₹ for Indian Rupees. Format numbers in Indian system (lakhs/crores).
+    now = datetime.now()
+    _, days_in_month = calendar.monthrange(now.year, now.month)
+    current_date_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    days_passed = now.day or 1
+
+    ctx = f"""You are Penny, a highly capable financial AI assistant for FinSight.
+You are interacting with {user_name}. Use only the retrieved financial data provided below.
+Current Date and Time: {current_date_str} (Day {days_passed} of {days_in_month} in this month).
+
+CRITICAL RULES for Phase 2 & 3:
+1. Provide short, exact, and highly specific data-driven answers. Mention concrete numbers.
+2. If data is unavailable, state it clearly. DO NOT hallucinate transactions, merchants, balances, or budgets.
+3. DO NOT give speculative investment advice (e.g., specific stocks to buy).
+4. FINANCIAL HEALTH SCORE: If asked, dynamically grade the user out of 100 based on their savings ratio, budget adherence, and recurring burdens. Be creative but mathematically grounded.
+5. DYNAMIC FORECASTING: To predict overspending or future expenses, use mathematical extrapolation: multiply their current month's expenses by ({days_in_month} / {days_passed}) to forecast their month-end total, and warn them if it will exceed their budgets or income.
+6. ANOMALIES & SUBSCRIPTIONS: Point out "Notable Large Transactions" as potential anomalies if they ask. Warn them about expensive "Identified Subscriptions".
+7. Be concise, warm, and actionable. Use ₹ for Indian Rupees. Format numbers in Indian system (lakhs/crores).
 
 === {user_name.upper()}'S FINANCIAL SNAPSHOT ===
 Accounts: {acc_count}
@@ -130,13 +152,59 @@ Net Cash Flow: ₹{net:,.2f} ({'surplus/savings capacity' if net >= 0 else 'defi
                 ctx += f"  Matures: {acc.get('maturity_date')} | Rate: {acc.get('interest_rate')}%\n"
         ctx += "\n"
 
+    # Budgets & Goals
+    if budgets:
+        ctx += "=== USER FINANCIAL GOALS & BUDGETS ===\n"
+        for b in budgets:
+            b_type = b.get("goal_type", "")
+            cat = b.get("category") or "Global"
+            amt = float(b.get("target_amount") or 0)
+            ctx += f"• {b_type} ({b.get('period')}): {b.get('title') or cat} | Target: ₹{amt:,.2f}\n"
+        ctx += "\n"
+        
+    # Top Merchants
+    if merchants:
+        ctx += "=== TOP MERCHANTS ===\n"
+        for m in merchants:
+            merchant = m.get("merchant", "Unknown")
+            amt = float(m.get("spent", 0))
+            count = m.get("txn_count", 0)
+            ctx += f"• {merchant}: ₹{amt:,.2f} ({count} txns)\n"
+        ctx += "\n"
+
+    # Six Month Trend
+    if trend:
+        ctx += "=== 6-MONTH INCOME & EXPENSE TREND ===\n"
+        ctx += "Note: Use THIS month-to-month breakdown when answering questions about 'My monthly spendings'.\n"
+        for t in trend:
+            m_label = t.get("month", "Unknown")
+            inc = float(t.get("total_income") or 0)
+            exp = float(t.get("total_expenses") or 0)
+            ctx += f"• Month {m_label} -> Total Income: ₹{inc:,.2f} | Total Expenses: ₹{exp:,.2f}\n"
+        ctx += "\n"
+
+    # Subscriptions & Recurring
+    if recurring:
+        ctx += "=== IDENTIFIED RECURRING SUBSCRIPTIONS & EMIs ===\n"
+        for r in recurring:
+            ctx += f"• {r.get('merchant', 'Unknown')}: ~₹{float(r.get('avg_amount') or 0):,.2f} / month (Active for {r.get('months_active')} months)\n"
+        ctx += "\n"
+        
+    # Anomalies
+    if anomalies:
+        ctx += "=== NOTABLE LARGE TRANSACTIONS (POTENTIAL ANOMALIES) ===\n"
+        for a in anomalies:
+            date_str = str(a.get('txn_date'))[:10]
+            ctx += f"• {date_str} | {a.get('category')} | {str(a.get('narration'))[:30]}: ₹{float(a.get('amount') or 0):,.2f}\n"
+        ctx += "\n"
+
     # Category breakdown
     rows = breakdown.get("breakdown", [])
     if rows:
         ctx += "=== SPENDING BY CATEGORY ===\n"
         for row in rows[:10]:
             cat   = row.get("category", "Other")
-            amt   = float(row.get("total_amount") or 0)
+            amt   = float(row.get("total_amount") or row.get("spent") or 0)
             count = row.get("txn_count", 0)
             ctx += f"• {cat}: ₹{amt:,.2f} ({count} txns)\n"
         ctx += "\n"
