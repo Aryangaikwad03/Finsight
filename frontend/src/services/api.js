@@ -59,12 +59,27 @@ export const aaAPI = {
 }
 
 export const pennyAPI = {
-  chat:           (data)   => api.post('/penny/chat', data),
-  getInsights:    ()       => api.get('/penny/insights'),
-  autoCategorize: (data)   => api.post('/penny/auto-categorize', data),
-  uploadStatement:(formData) => api.post('/penny/upload-statement', formData, {
+  // SSE streaming chat — returns a fetch Response for manual stream reading
+  chatStream: async (question, history = []) => {
+    const token = localStorage.getItem('access_token')
+    return fetch('/api/penny/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({ question, messages: history }),
+    })
+  },
+  getInsights:     ()       => api.get('/penny/insights'),
+  autoCategorize:  (data)   => api.post('/penny/auto-categorize', data),
+  uploadStatement: (formData) => api.post('/penny/upload-statement', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   }),
+  getHistory:      ()       => api.get('/penny/history'),
+  clearHistory:    ()       => api.delete('/penny/history'),
+  submitFeedback:  (data)   => api.post('/penny/feedback', data),
+  refreshVectors:  ()       => api.post('/penny/refresh-vectors'),
 }
 
 export const goalsAPI = {

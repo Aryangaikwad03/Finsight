@@ -14,6 +14,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_tables()
+    from app.core.db_config import init_penny_tables
+    init_penny_tables()
     print(f"✅ FinSight API started | env={settings.APP_ENV}")
     yield
     print("FinSight API shutting down")
