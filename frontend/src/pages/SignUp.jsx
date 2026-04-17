@@ -30,7 +30,7 @@ export default function Signup() {
     if (!v.email.trim())     e.email     = 'Email is required.'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email)) e.email = 'Enter a valid email.'
     if (!v.mobile.trim())    e.mobile    = 'Mobile number is required.'
-    else if (!/^\d{10,13}$/.test(v.mobile.replace(/\D/g, ''))) e.mobile = 'Enter a valid 10-digit mobile number.'
+    else if (v.mobile.replace(/\D/g, '').length < 10) e.mobile = 'Enter a valid 10-digit mobile number.'
     if (!v.password)         e.password  = 'Password is required.'
     else if (v.password.length < 8) e.password = 'Password must be at least 8 characters.'
     if (!v.agree)            e.agree     = 'You must accept the terms.'
@@ -189,9 +189,9 @@ export default function Signup() {
 
                 <button
                   type="submit"
-                  disabled={!isValid || loading}
+                  disabled={loading}
                   className={`w-full px-6 py-3 rounded-md font-semibold transition flex items-center justify-center gap-2 ${
-                    isValid && !loading ? 'bg-black hover:bg-slate-800 text-white' : 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    !loading ? 'bg-black hover:bg-slate-800 text-white shadow-lg' : 'bg-slate-200 text-slate-500 cursor-not-allowed'
                   }`}
                 >
                   {loading ? (

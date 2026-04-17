@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import DashboardLayout from '../components/DashboardLayout'
 import { useAuth } from '../context/AuthContext'
 import { aaAPI } from '../services/api'
@@ -61,8 +62,11 @@ function AccountCard({ acc, isSelected, onToggle, txns }) {
   const isDep   = type === 'DEPOSIT'
   const isTDRD  = isTD || isRD
 
-  const accIncome  = txns.filter(t => ['CREDIT','INTEREST','OPENING'].includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
-  const accExpense = txns.filter(t => ['DEBIT','TDS'].includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
+  const incomeTypes = ['CREDIT', 'INTEREST', 'OPENING', 'REFUND', 'DEPOSIT', 'INWARD', 'REVERSAL']
+  const expenseTypes = ['DEBIT', 'TDS', 'PAYMENT', 'INSTALLMENT', 'WITHDRAWAL', 'OUTWARD', 'FEES', 'CHARGES', 'TAX', 'OTHERS']
+
+  const accIncome  = txns.filter(t => incomeTypes.includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
+  const accExpense = txns.filter(t => expenseTypes.includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
 
   const typeLabel = { DEPOSIT: 'Savings/Current', TERM_DEPOSIT: 'Term Deposit', RECURRING_DEPOSIT: 'Recurring Deposit' }[type] ?? type
 
@@ -95,10 +99,21 @@ function AccountCard({ acc, isSelected, onToggle, txns }) {
 
       <div className="space-y-1.5">
         {/* DEPOSIT — show current balance */}
-        {isDep && acc.current_balance != null && (
+        {isDep && (
           <div className="flex justify-between">
             <span className="text-xs text-slate-400">Balance</span>
-            <span className={`text-sm font-bold ${isSelected ? 'text-brand-700' : 'text-slate-400'}`}>{fmt(acc.current_balance)}</span>
+            <span className="text-sm font-bold text-slate-700">
+              {(() => {
+                const dbBal = (Number(acc.current_balance) || 0) + (Number(acc.current_value) || 0)
+                if (dbBal !== 0) return fmt(dbBal)
+                
+                const sorted = [...txns].sort((a,b) => new Date(b.txn_date) - new Date(a.txn_date))
+                const latestTxnBal = sorted.find(t => t.balance_after != null)?.balance_after
+                if (latestTxnBal != null) return fmt(latestTxnBal)
+
+                return fmt(txns.reduce((s, t) => s + (incomeTypes.includes(t.txn_type) ? 1 : -1) * (Number(t.amount) || 0), 0))
+              })()}
+            </span>
           </div>
         )}
 
@@ -346,6 +361,7 @@ function CategoryEditor({ txn, categories, onSave, onClose }) {
 // ── Main page ──────────────────────────────────────────────────────────────
 export default function Transactions() {
   const { user, loading: authLoading } = useAuth()
+  const location = useLocation()
   const [status, setStatus]           = useState('loading')
   const [accounts, setAccounts]       = useState([])
   const [allTxns, setAllTxns]         = useState([])
@@ -356,6 +372,16 @@ export default function Transactions() {
   const [toDate, setToDate]           = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 50
+
+  // Drilldown handler
+  useEffect(() => {
+    if (location.state?.category) {
+      setSearch(location.state.category) // Use search to filter by category name
+    }
+    if (location.state?.fi_data_id) {
+      setSelectedIds(new Set([location.state.fi_data_id]))
+    }
+  }, [location.state])
   const [activeTab, setActiveTab]     = useState('transactions')
   const [categories, setCategories]   = useState({ builtin: [], custom: [] })
   const [editingTxn, setEditingTxn]   = useState(null)  // txn being edited
@@ -425,18 +451,43 @@ export default function Transactions() {
   const paginated = useMemo(() => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), [filtered, currentPage])
   const maxPage = Math.max(1, Math.ceil(filtered.length / pageSize))
 
+  const incomeTypes = ['CREDIT', 'INTEREST', 'OPENING', 'REFUND', 'DEPOSIT', 'INWARD', 'REVERSAL']
+  const expenseTypes = ['DEBIT', 'TDS', 'PAYMENT', 'INSTALLMENT', 'WITHDRAWAL', 'OUTWARD', 'FEES', 'CHARGES', 'TAX', 'OTHERS']
+
   const dynamicSummary = useMemo(() => {
-    const income   = filtered.filter(t => ['CREDIT','INTEREST','OPENING'].includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
-    const expenses = filtered.filter(t => ['DEBIT','TDS'].includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
+    const income   = filtered.filter(t => incomeTypes.includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
+    const expenses = filtered.filter(t => expenseTypes.includes(t.txn_type)).reduce((s,t)=>s+(Number(t.amount)||0),0)
+
+    const selectedAccounts = accounts.filter(a => selectedIds.has(a.fi_data_id))
+    
+    // Calculate total balance by evaluating each selected account individually
+    const totalBal = selectedAccounts.reduce((sum, acc) => {
+      // 1. Check for stored balance in DB (Savings or Investment/FD)
+      const dbBal = (Number(acc.current_balance) || 0) + (Number(acc.current_value) || 0)
+      if (dbBal !== 0) return sum + dbBal
+
+      // 2. Priority 2: Latest balance_after from transactions
+      const accTxns = allTxns.filter(t => t.fi_data_id === acc.fi_data_id)
+      const sorted = [...accTxns].sort((a,b) => new Date(b.txn_date) - new Date(a.txn_date))
+      const latestTxnBal = sorted.find(t => t.balance_after != null)?.balance_after
+      if (latestTxnBal != null) return sum + Number(latestTxnBal)
+
+      // 3. Fallback: Calculate from all transactions for THIS account
+      const calculated = accTxns.reduce((s, t) => {
+        const isIncome = incomeTypes.includes(t.txn_type)
+        return s + (isIncome ? 1 : -1) * (Number(t.amount) || 0)
+      }, 0)
+      
+      return sum + calculated
+    }, 0)
 
     return {
-      // Total balance = net flow (income - expenses) from selected accounts
-      total_balance:  income - expenses,
+      total_balance:  totalBal,
       account_count:  selectedIds.size,
       total_income:   income,
       total_expenses: expenses,
     }
-  }, [filtered, selectedIds])
+  }, [filtered, selectedIds, accounts, allTxns])
 
   // All unique txn types present
   const txnTypes = useMemo(() => [...new Set(allTxns.map(t => t.txn_type))].filter(Boolean), [allTxns])
@@ -644,9 +695,9 @@ export default function Transactions() {
                           </td>
                           <td className="px-4 py-3 text-right whitespace-nowrap">
                             <span className={`text-sm font-bold ${
-                              ['CREDIT','INTEREST','OPENING'].includes(txn.txn_type) ? 'text-green-600' : 'text-red-500'
+                              incomeTypes.includes(txn.txn_type) ? 'text-green-600' : 'text-red-500'
                             }`}>
-                              {['CREDIT','INTEREST','OPENING'].includes(txn.txn_type) ? '+' : '−'}{fmt(txn.amount)}
+                              {incomeTypes.includes(txn.txn_type) ? '+' : '−'}{fmt(txn.amount)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right hidden lg:table-cell">
@@ -663,10 +714,10 @@ export default function Transactions() {
                     <span className="text-slate-300">|</span>
                     <p className="text-xs text-slate-500">
                       Net Flow: <span className={`font-bold ml-1 ${
-                        filtered.reduce((s,t)=>s+(['CREDIT','INTEREST','OPENING'].includes(t.txn_type)?1:-1)*(Number(t.amount)||0),0)>=0
+                        filtered.reduce((s,t)=>s+(incomeTypes.includes(t.txn_type)?1:-1)*(Number(t.amount)||0),0)>=0
                           ?'text-green-600':'text-red-500'
                       }`}>
-                        {fmt(Math.abs(filtered.reduce((s,t)=>s+(['CREDIT','INTEREST','OPENING'].includes(t.txn_type)?1:-1)*(Number(t.amount)||0),0)))}
+                        {fmt(Math.abs(filtered.reduce((s,t)=>s+(incomeTypes.includes(t.txn_type)?1:-1)*(Number(t.amount)||0),0)))}
                       </span>
                     </p>
                   </div>

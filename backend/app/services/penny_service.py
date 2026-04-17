@@ -246,24 +246,55 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
         raise ValueError("Could not extract text from the uploaded file.")
 
     HEADER_MAP = {
-        "DATE": ["date", "txn date", "transaction date", "tran date", "value date", "posting date", "entry date", "effective date", "transaction on", "txn on"],
-        "DESC": ["narration", "particulars", "description", "remarks", "transaction details", "details", "reference", "remarks/description", "transaction remarks", "info", "transaction description", "narration details", "transaction particulars", "remarks details"],
-        "CREDIT": ["credit", "cr", "cr.", "deposit", "deposits", "credit amount", "amount cr", "paid in", "receipt", "received", "received amount", "inflow", "credit value", "cr amount"],
-        "DEBIT": ["debit", "dr", "dr.", "withdrawal", "withdrawals", "debit amount", "amount dr", "paid out", "payment", "spent", "outflow", "debit value", "dr amount"],
-        "BALANCE": ["balance", "closing balance", "running balance", "available balance", "ledger balance", "current balance", "balance amount", "available amt", "ledger amt"],
-        "AMOUNT": ["amount", "txn amount", "transaction amount"]
+        "DATE": [
+            "date", "txn date", "transaction date", "tran date", "value date", "posting date", 
+            "entry date", "effective date", "transaction on", "txn on", "valuedate", "txndate",
+            "date of transaction", "tran. date", "statement date"
+        ],
+        "DESC": [
+            "narration", "particulars", "description", "remarks", "transaction details", "details", 
+            "reference", "remarks/description", "transaction remarks", "info", "transaction description", 
+            "narration details", "transaction particulars", "remarks details", "desc", "transaction",
+            "subject", "trans details", "particulars details"
+        ],
+        "CREDIT": [
+            "credit", "cr", "cr.", "deposit", "deposits", "credit amount", "amount cr", "paid in", 
+            "receipt", "received", "received amount", "inflow", "credit value", "cr amount",
+            "deposit amt", "credits", "pay in", "money in"
+        ],
+        "DEBIT": [
+            "debit", "dr", "dr.", "withdrawal", "withdrawals", "debit amount", "amount dr", "paid out", 
+            "payment", "spent", "outflow", "debit value", "dr amount", "withdrawal amt", "debits",
+            "pay out", "money out"
+        ],
+        "BALANCE": [
+            "balance", "bal", "bal.", "closing balance", "running balance", "available balance", 
+            "ledger balance", "current balance", "balance amount", "available amt", "ledger amt",
+            "total balance", "account balance", "running bal", "bal amt", "cl. bal", "closing bal"
+        ],
+        "AMOUNT": [
+            "amount", "txn amount", "transaction amount", "value", "total amount", "amt", "txn amt"
+        ]
     }
 
     transactions = []
     lines = text.split('\n')
-    
+
+    # Detect if this is a piped structured format (from CSV/Excel)
+    is_piped = False
+    if lines:
+        for l in lines[:5]:
+            if "|" in l:
+                is_piped = True
+                break
+
     # Heuristic Regex: Match dates like 01/12/2026, 01-Mar-2026, 01 Mar 26
     date_regex = re.compile(r'^\s*(\d{1,2}[/\-\s]+(?:[a-zA-Z]{3,4}|\d{1,2})[/\-\s]+\d{2,4})')
-    
+
     last_balance = None
     num_columns_order = []
     header_offsets = {}
-    
+
     for line in lines:
         line = line.strip()
         if not line:
@@ -275,92 +306,144 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
             pos = {}
             for key, aliases in HEADER_MAP.items():
                 for alias in aliases:
-                    if re.search(r'\b' + re.escape(alias) + r'\b', line_lower):
-                        pos[key] = line_lower.find(alias)
-                        break
+                    if is_piped:
+                        # For piped files, check column headers
+                        headers = [h.strip().lower() for h in line.split('|')]
+                        for i, h in enumerate(headers):
+                            if alias in h:
+                                pos[key] = i
+                                break
+                        if key in pos: break
+                    else:
+                        if re.search(r'\b' + re.escape(alias) + r'\b', line_lower):
+                            pos[key] = line_lower.find(alias)
+                            break
+            
             if "DATE" in pos and ("DEBIT" in pos or "CREDIT" in pos or "AMOUNT" in pos or "BALANCE" in pos):
-                cols_sorted = sorted([(k, idx) for k, idx in pos.items() if k in ["DEBIT", "CREDIT", "BALANCE", "AMOUNT"]], key=lambda x: x[1])
-                num_columns_order = [k for k, _ in cols_sorted]
+                cols_sorted = sorted([(k, idx) for k, idx in pos.items() if k in ["DATE", "DESC", "DEBIT", "CREDIT", "BALANCE", "AMOUNT"]], key=lambda x: x[1])
+                num_columns_order = [k for k, _ in cols_sorted if k in ["DEBIT", "CREDIT", "BALANCE", "AMOUNT"]]
                 header_offsets = {k: idx for k, idx in cols_sorted}
+                logger.info("  Detected headers: %s (Piped: %s)", pos, is_piped)
                 continue
 
-        date_match = date_regex.search(line)
-        if date_match:
-            raw_date = date_match.group(1).strip()
-            rest_of_line = line[date_match.end():].strip()
+        # Parsing logic
+        if is_piped:
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) < 2: continue
             
-            num_matches = list(re.finditer(r'(?:^|\s)((?:\d{1,3}(?:,\d{2,3})+|\d+)\.\d{2})(?=\s|$|[A-Za-z])', rest_of_line))
-            if not num_matches:
-                continue
-                
-            first_num_start = num_matches[0].start()
-            narr_parts = []
-            last_end = 0
-            for match in num_matches:
-                narr_parts.append(rest_of_line[last_end:match.start()])
-                last_end = match.end()
-            narr_parts.append(rest_of_line[last_end:])
+            # Map columns to values
+            val_map = {}
+            for k, idx in header_offsets.items():
+                if idx < len(parts): val_map[k] = parts[idx]
             
-            narration = " ".join(narr_parts)
-            narration = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', narration, flags=re.IGNORECASE)
-            narration = re.sub(r'\s+', ' ', narration).strip()
+            raw_date = val_map.get("DATE", "")
+            if not raw_date or not _has_date(raw_date): continue
             
-            nums = [float(m.group(1).replace(',', '')) for m in num_matches]
+            narration = ""
+            if "DESC" in pos and pos["DESC"] < len(parts):
+                narration = parts[pos["DESC"]]
+            
+            # Handle amounts
             amount = 0.0
             txn_type = "DEBIT"
-            balance = None
-            
-            assigned = {}
-            if num_columns_order and 0 < len(nums) <= len(num_columns_order):
-                if len(nums) == len(num_columns_order):
-                    assigned = {k: v for k, v in zip(num_columns_order, nums)}
-                elif len(nums) == len(num_columns_order) - 1 and "BALANCE" in num_columns_order:
-                    assigned["BALANCE"] = nums[-1]
-                    remaining_num = nums[0]
-                    if last_balance is not None:
-                        if abs(last_balance - remaining_num - assigned["BALANCE"]) < 0.1: assigned["DEBIT"] = remaining_num
-                        elif abs(last_balance + remaining_num - assigned["BALANCE"]) < 0.1: assigned["CREDIT"] = remaining_num
-                    
-                    if "DEBIT" not in assigned and "CREDIT" not in assigned:
-                        up_line = line.upper()
-                        if ' CR' in up_line or 'CR.' in up_line: assigned["CREDIT"] = remaining_num
-                        else: assigned["DEBIT"] = remaining_num
-
-                if "AMOUNT" in assigned:
-                    amount = assigned["AMOUNT"]
-                    txn_type = "CREDIT" if ' CR' in line.upper() else "DEBIT"
-                else:
-                    if "CREDIT" in assigned and assigned["CREDIT"] > 0: amount, txn_type = assigned["CREDIT"], "CREDIT"
-                    else: amount, txn_type = assigned.get("DEBIT", 0), "DEBIT"
-                balance = assigned.get("BALANCE")
-
-            if balance is not None: last_balance = balance
+            if "AMOUNT" in val_map:
+                amount = _clean_amount(val_map["AMOUNT"])
+                # Guess type if not explicit
+                txn_type = "CREDIT" if amount > 0 and ("CR" in line.upper() or "RECEIVED" in line.upper()) else "DEBIT"
+            elif "CREDIT" in val_map and _clean_amount(val_map["CREDIT"]) > 0:
+                amount = _clean_amount(val_map["CREDIT"])
+                txn_type = "CREDIT"
+            elif "DEBIT" in val_map and _clean_amount(val_map["DEBIT"]) > 0:
+                amount = _clean_amount(val_map["DEBIT"])
+                txn_type = "DEBIT"
                 
-            parsed_date = None
-            d_clean = raw_date.replace('-', ' ').replace('/', ' ')
-            for fmt in ("%d %m %Y", "%d %b %Y", "%d %B %Y", "%d %m %y", "%d %b %y"):
-                try:
-                    parsed_date = datetime.strptime(d_clean, fmt)
-                    break
-                except : pass
-                    
+            balance = _clean_amount(val_map.get("BALANCE", "0"))
+            if balance: last_balance = balance
+
+            parsed_date = _parse_statement_date(raw_date)
             transactions.append({
                 "txnId": str(uuid.uuid4()),
                 "transactionTimestamp": (parsed_date or datetime.now()).isoformat() + "+00:00",
                 "valueDate": (parsed_date or datetime.now()).strftime("%Y-%m-%d"),
-                "amount": amount,
+                "amount": abs(amount),
                 "type": txn_type,
                 "mode": "OTHERS",
-                "narration": narration,
+                "narration": narration or "Transaction",
                 "currentBalance": balance
             })
-        elif num_columns_order and transactions:
-            # Continuation row
-            if len(line) > 2 and not re.search(r'(?i)page|statement|opening balance|closing balance', line):
-                if not re.search(r'^\s*[\d,\.\-]+\s*$', line):
-                    clean_line = re.sub(r'\b(?:CR|DR)\b', '', line, flags=re.IGNORECASE).strip()
-                    if clean_line:
-                        transactions[-1]["narration"] = (transactions[-1]["narration"] + " " + clean_line).strip()
+        else:
+            # Existing Heuristic Regex for PDF
+            date_match = date_regex.search(line)
+            if date_match:
+                raw_date = date_match.group(1).strip()
+                rest_of_line = line[date_match.end():].strip()
+                
+                num_matches = list(re.finditer(r'(?:^|\s)((?:\d{1,3}(?:,\d{2,3})+|\d+)\.\d{2})(?=\s|$|[A-Za-z])', rest_of_line))
+                if not num_matches:
+                    continue
+                    
+                first_num_start = num_matches[0].start()
+                narr_parts = []
+                last_end = 0
+                for match in num_matches:
+                    narr_parts.append(rest_of_line[last_end:match.start()])
+                    last_end = match.end()
+                narr_parts.append(rest_of_line[last_end:])
+                
+                narration = " ".join(narr_parts)
+                narration = re.sub(r'\b(?:CR|DR|Cr\.?|Dr\.?)\b', '', narration, flags=re.IGNORECASE)
+                narration = re.sub(r'\s+', ' ', narration).strip()
+                
+                nums = [float(m.group(1).replace(',', '')) for m in num_matches]
+                amount = 0.0
+                txn_type = "DEBIT"
+                balance = None
+                
+                assigned = {}
+                if num_columns_order and 0 < len(nums) <= len(num_columns_order):
+                    if len(nums) == len(num_columns_order):
+                        assigned = {k: v for k, v in zip(num_columns_order, nums)}
+                    elif len(nums) == len(num_columns_order) - 1 and "BALANCE" in num_columns_order:
+                        assigned["BALANCE"] = nums[-1]
+                        remaining_num = nums[0]
+                        if last_balance is not None:
+                            if abs(last_balance - remaining_num - assigned["BALANCE"]) < 0.1: assigned["DEBIT"] = remaining_num
+                            elif abs(last_balance + remaining_num - assigned["BALANCE"]) < 0.1: assigned["CREDIT"] = remaining_num
+                        
+                        if "DEBIT" not in assigned and "CREDIT" not in assigned:
+                            up_line = line.upper()
+                            if ' CR' in up_line or 'CR.' in up_line: assigned["CREDIT"] = remaining_num
+                            else: assigned["DEBIT"] = remaining_num
+
+                    if "AMOUNT" in assigned:
+                        amount = assigned["AMOUNT"]
+                        txn_type = "CREDIT" if ' CR' in line.upper() else "DEBIT"
+                    else:
+                        if "CREDIT" in assigned and assigned["CREDIT"] > 0: amount, txn_type = assigned["CREDIT"], "CREDIT"
+                        else: amount, txn_type = assigned.get("DEBIT", 0), "DEBIT"
+                    balance = assigned.get("BALANCE")
+
+                if balance is not None: last_balance = balance
+                    
+                parsed_date = _parse_statement_date(raw_date)
+                        
+                transactions.append({
+                    "txnId": str(uuid.uuid4()),
+                    "transactionTimestamp": (parsed_date or datetime.now()).isoformat() + "+00:00",
+                    "valueDate": (parsed_date or datetime.now()).strftime("%Y-%m-%d"),
+                    "amount": amount,
+                    "type": txn_type,
+                    "mode": "OTHERS",
+                    "narration": narration,
+                    "currentBalance": balance
+                })
+            elif num_columns_order and transactions:
+                # Continuation row for PDF
+                if len(line) > 2 and not re.search(r'(?i)page|statement|opening balance|closing balance', line):
+                    if not re.search(r'^\s*[\d,\.\-]+\s*$', line):
+                        clean_line = re.sub(r'\b(?:CR|DR)\b', '', line, flags=re.IGNORECASE).strip()
+                        if clean_line:
+                            transactions[-1]["narration"] = (transactions[-1]["narration"] + " " + clean_line).strip()
 
     # --- Metadata Extraction (Bank Name & Acc Number) ---
     bank_name = "Other Bank"
@@ -466,13 +549,28 @@ def _extract_text_from_file(file_bytes: bytes, filename: str, password: str = No
         try:
             import pandas as pd
             import io
+            import sys
+            logger.info("Processing tabular file using: %s", sys.executable)
             if fname.endswith(".csv"):
-                df = pd.read_csv(io.BytesIO(file_bytes))
+                # Robust CSV reading: find the actual header row
+                import io
+                content_sample = file_bytes[:20000].decode('utf-8', errors='ignore')
+                sample_lines = content_sample.split('\n')
+                skip_count = 0
+                for i, line in enumerate(sample_lines[:50]):
+                    l_low = line.lower()
+                    if any(k in l_low for k in ["date", "transaction", "narration", "particulars"]):
+                        skip_count = i
+                        break
+                
+                df = pd.read_csv(io.BytesIO(file_bytes), skiprows=skip_count, on_bad_lines='skip')
             else:
                 df = pd.read_excel(io.BytesIO(file_bytes))
-            return df.to_string()
-        except ImportError:
-            raise ValueError("Please install pandas: pip install pandas openpyxl")
+            # Return piped format for robust parsing in parse_bank_statement
+            return df.to_csv(index=False, sep='|')
+        except Exception as e:
+            logger.error("Tabular data processing failed: %s", e)
+            raise ValueError(f"Please ensure pandas and openpyxl are installed: {str(e)}")
 
     elif fname.endswith(".txt"):
         return file_bytes.decode("utf-8", errors="ignore")
@@ -483,6 +581,33 @@ def _extract_text_from_file(file_bytes: bytes, filename: str, password: str = No
             return file_bytes.decode("utf-8", errors="ignore")
         except Exception:
             raise ValueError(f"Unsupported file type: {filename}")
+
+
+def _has_date(text: str) -> bool:
+    """Check if a string starts with/contains a standard date."""
+    # Matches DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, etc.
+    _DATE_REGEX = r'\b(?:\d{1,2}[/\-\s]+(?:[a-zA-Z]{3,4}|\d{1,2})[/\-\s]+\d{2,4}|\d{4}[/\-\s]+\d{1,2}[/\-\s]+\d{1,2})\b'
+    return bool(re.search(_DATE_REGEX, str(text)))
+
+
+def _clean_amount(val: str) -> float:
+    """Clean amount string into float."""
+    if not val: return 0.0
+    if isinstance(val, (int, float)): return float(val)
+    clean = re.sub(r'[^\d\.\-]', '', str(val).replace(',', ''))
+    try: return float(clean) if clean else 0.0
+    except ValueError: return 0.0
+
+
+def _parse_statement_date(val: str):
+    """Robust date parser."""
+    from datetime import datetime
+    if not val: return None
+    clean = str(val).replace('-', ' ').replace('/', ' ').replace(',', ' ').strip()
+    for fmt in ("%d %m %Y", "%d %b %Y", "%d %B %Y", "%d %m %y", "%d %b %y", "%Y %m %d"):
+        try: return datetime.strptime(clean, fmt)
+        except ValueError: continue
+    return None
 
 
 def statement_to_fi_format(parsed: Dict, user_id: str, session_id: str, consent_id: str) -> Dict:

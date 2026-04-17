@@ -2,28 +2,34 @@
 requests>=2.31.0
 urllib3>=2.0.0
 
-# Webhook server (optional but recommended)
-fastapi>=0.110.0
-uvicorn[standard]>=0.27.0
-
-# Useful utilities
-python-dateutil>=2.8.2
+# Webhook server
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+
+# Database & ORM
 sqlalchemy==2.0.36
 greenlet>=3.0.0
 alembic==1.13.3
 asyncpg==0.30.0
 psycopg2-binary==2.9.10
+
+# Security & Auth
 pydantic[email]==2.9.2
 pydantic-settings==2.6.1
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.12
+
+# HTTP & Logic
 httpx==0.27.2
 python-dotenv==1.0.1
 groq
 pinecone
+
+# Data & PDF Processing
 pdfplumber
+PyPDF2
 pandas
 openpyxl
+xlrd
+lxml

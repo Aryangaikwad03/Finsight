@@ -280,9 +280,9 @@ export default function Consent() {
                 >
                   Revoke
                 </button>
-                <label className="text-xs px-3 py-1.5 rounded-full bg-brand-500/20 text-brand-300 hover:bg-brand-500/30 transition-colors cursor-pointer flex items-center gap-1">
+                <label className="text-xs px-3 py-1.5 rounded-full bg-brand-500/20 text-brand-300 hover:bg-brand-500/30 transition-colors cursor-pointer flex items-center gap-1" title="Supports PDF, CSV, Excel">
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                  Upload Statement
+                  Upload PDF / CSV / Excel
                   <input type="file" className="hidden" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileUpload} />
                 </label>
               </div>
@@ -356,11 +356,16 @@ export default function Consent() {
               
               <div className="text-slate-400 text-sm font-medium">OR</div>
 
-              <label className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-700 font-medium shadow-sm hover:bg-slate-50 transition-all text-sm cursor-pointer">
-                <svg className="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                Upload Offline Statement
-                <input type="file" className="hidden" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileUpload} />
-              </label>
+              <div className="flex flex-col items-center">
+                <label className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-700 font-medium shadow-sm hover:bg-slate-50 transition-all text-sm cursor-pointer">
+                  <svg className="w-4 h-4 text-brand-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+                  Upload Statement (PDF, CSV, Excel)
+                  <input type="file" className="hidden" accept=".pdf,.csv,.xlsx,.xls" onChange={handleFileUpload} />
+                </label>
+                <p className="text-[10px] text-slate-400 mt-2 italic">
+                  Supports .pdf, .csv, .xlsx, .xls formats
+                </p>
+              </div>
             </div>
           </div>
         )}
