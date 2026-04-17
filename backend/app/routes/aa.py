@@ -132,15 +132,17 @@ async def setu_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/fi-data")
 async def get_fi_data(
-    db:   AsyncSession = Depends(get_db),
-    user: User         = Depends(get_current_user),
+    month: int = None,
+    year:  int = None,
+    db:    AsyncSession = Depends(get_db),
+    user:  User         = Depends(get_current_user),
 ):
     """
     Returns accounts + transactions + summary for the logged-in user.
     Always user-scoped — all sessions merged, deduplicated at DB level.
     """
     user_id = str(user.id)
-    logger.info("GET /fi-data user=%s", user_id)
+    logger.info("GET /fi-data user=%s month=%s year=%s", user_id, month, year)
 
     from app.core.db_config import (
         get_user_accounts, get_user_transactions,
@@ -150,8 +152,8 @@ async def get_fi_data(
     try:
         accounts     = get_user_accounts(user_id)
         transactions = get_user_transactions(user_id)
-        summary      = get_user_summary(user_id)
-        breakdown    = get_category_breakdown(user_id)
+        summary      = get_user_summary(user_id, month=month, year=year)
+        breakdown    = get_category_breakdown(user_id, month=month, year=year)
     except Exception as e:
         logger.error("fi-data query failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -432,3 +434,32 @@ async def get_categories(user: User = Depends(get_current_user)):
         return {"builtin": builtin, "custom": custom_list}
     finally:
         cur.close(); conn.close()
+@router.get("/user-summary")
+async def get_user_summary_route(
+    month: int = None,
+    year: int = None,
+    user: User = Depends(get_current_user)
+):
+    from app.core.db_config import get_user_summary
+    return get_user_summary(str(user.id), month, year)
+
+
+@router.get("/category-breakdown")
+async def get_category_breakdown_route(
+    month: int = None,
+    year: int = None,
+    user: User = Depends(get_current_user)
+):
+    from app.core.db_config import get_category_breakdown
+    return get_category_breakdown(str(user.id), month, year)
+
+
+@router.get("/category-drilldown")
+async def get_category_drilldown_route(
+    category: str,
+    month: int = None,
+    year: int = None,
+    user: User = Depends(get_current_user)
+):
+    from app.core.db_config import get_category_drilldown
+    return get_category_drilldown(str(user.id), category, month, year)

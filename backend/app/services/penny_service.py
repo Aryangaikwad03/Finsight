@@ -246,12 +246,35 @@ def parse_bank_statement(file_bytes: bytes, filename: str, user_name: str, passw
         raise ValueError("Could not extract text from the uploaded file.")
 
     HEADER_MAP = {
-        "DATE": ["date", "txn date", "transaction date", "tran date", "value date", "posting date", "entry date", "effective date", "transaction on", "txn on"],
-        "DESC": ["narration", "particulars", "description", "remarks", "transaction details", "details", "reference", "remarks/description", "transaction remarks", "info", "transaction description", "narration details", "transaction particulars", "remarks details"],
-        "CREDIT": ["credit", "cr", "cr.", "deposit", "deposits", "credit amount", "amount cr", "paid in", "receipt", "received", "received amount", "inflow", "credit value", "cr amount"],
-        "DEBIT": ["debit", "dr", "dr.", "withdrawal", "withdrawals", "debit amount", "amount dr", "paid out", "payment", "spent", "outflow", "debit value", "dr amount"],
-        "BALANCE": ["balance", "closing balance", "running balance", "available balance", "ledger balance", "current balance", "balance amount", "available amt", "ledger amt"],
-        "AMOUNT": ["amount", "txn amount", "transaction amount"]
+        "DATE": [
+            "date", "txn date", "transaction date", "tran date", "value date", "posting date", 
+            "entry date", "effective date", "transaction on", "txn on", "valuedate", "txndate",
+            "date of transaction", "tran. date", "statement date"
+        ],
+        "DESC": [
+            "narration", "particulars", "description", "remarks", "transaction details", "details", 
+            "reference", "remarks/description", "transaction remarks", "info", "transaction description", 
+            "narration details", "transaction particulars", "remarks details", "desc", "transaction",
+            "subject", "trans details", "particulars details"
+        ],
+        "CREDIT": [
+            "credit", "cr", "cr.", "deposit", "deposits", "credit amount", "amount cr", "paid in", 
+            "receipt", "received", "received amount", "inflow", "credit value", "cr amount",
+            "deposit amt", "credits", "pay in", "money in"
+        ],
+        "DEBIT": [
+            "debit", "dr", "dr.", "withdrawal", "withdrawals", "debit amount", "amount dr", "paid out", 
+            "payment", "spent", "outflow", "debit value", "dr amount", "withdrawal amt", "debits",
+            "pay out", "money out"
+        ],
+        "BALANCE": [
+            "balance", "bal", "bal.", "closing balance", "running balance", "available balance", 
+            "ledger balance", "current balance", "balance amount", "available amt", "ledger amt",
+            "total balance", "account balance", "running bal", "bal amt", "cl. bal", "closing bal"
+        ],
+        "AMOUNT": [
+            "amount", "txn amount", "transaction amount", "value", "total amount", "amt", "txn amt"
+        ]
     }
 
     transactions = []

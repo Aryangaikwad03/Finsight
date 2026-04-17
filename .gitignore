@@ -1,17 +1,38 @@
 # Python environments
+venv/
 backend/venv/
+__pycache__/
 backend/__pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Node modules
+node_modules/
 frontend/node_modules/
 frontend/dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # Environment files
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 backend/.env
 frontend/.env
 *.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Bank statements and sample data
 *.csv
@@ -20,3 +41,7 @@ frontend/.env
 *.pdf
 fi_data_*.json
 scratch/
+
+# OS files
+.DS_Store
+Thumbs.db
