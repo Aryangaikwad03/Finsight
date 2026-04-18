@@ -1,7 +1,7 @@
 """
-penny_service.py — Penny AI Assistant
-Uses Groq (llama-3.1-8b-instant) for chat + Pinecone for vector memory.
-Handles: chat, financial context building, bank statement parsing.
+penny_service.py — Penny AI Assistant v2.0
+Hybrid RAG pipeline: Intent Router → Exact SQL → Pinecone retrieval → Groq LLM.
+Handles: streaming chat, bank statement parsing, auto-categorization.
 """
 import json
 import logging
@@ -22,14 +22,43 @@ def _groq_client():
     return Groq(api_key=settings.GROQ_API_KEY)
 
 
-def _llm(messages: List[Dict], temperature: float = 0.7, max_tokens: int = 1024, model: str = "llama-3.3-70b-versatile") -> str:
+FALLBACK_MODEL = "llama-3.1-8b-instant"  # 500k TPD — used when 70b limit hit
+
+def _llm(messages: List[Dict], temperature: float = 0.4, max_tokens: int = 600,
+          model: str = "llama-3.3-70b-versatile", stream: bool = False):
+    """Call Groq LLM. Auto-falls back to llama-3.1-8b-instant on 429 rate limit."""
     client = _groq_client()
-    resp   = client.chat.completions.create(
-        model       = model,
-        messages    = messages,
-        temperature = temperature,
-        max_tokens  = max_tokens,
-    )
+
+    def _call(m):
+        return client.chat.completions.create(
+            model=m, messages=messages,
+            temperature=temperature, max_tokens=max_tokens, stream=stream,
+        )
+
+    try:
+        resp = _call(model)
+    except Exception as e:
+        err_str = str(e)
+        # Fallback to smaller model on rate limit
+        if "429" in err_str or "rate_limit" in err_str.lower():
+            if model != FALLBACK_MODEL:
+                logger.warning("Rate limit on %s — falling back to %s", model, FALLBACK_MODEL)
+                try:
+                    resp = _call(FALLBACK_MODEL)
+                except Exception as e2:
+                    raise e2
+            else:
+                raise
+        else:
+            raise
+
+    if stream:
+        def _gen():
+            for chunk in resp:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+        return _gen()
     return resp.choices[0].message.content.strip()
 
 
@@ -235,66 +264,243 @@ Always end with a specific, actionable tip based on their actual data.
 
 
 def store_user_context_vectors(user_id: str, user_name: str):
-    """Store user's financial summaries as vectors in Pinecone for retrieval."""
+    """Delegate to dedicated vector_store module (Penny v2.0)."""
     try:
-        from app.core.db_config import get_user_transactions, get_category_breakdown
-        index    = _pinecone_index()
-        txns     = get_user_transactions(user_id, limit=500)
-        breakdown = get_category_breakdown(user_id)
-
-        vectors = []
-
-        # Store category summaries
-        for row in breakdown.get("breakdown", []):
-            cat  = row.get("category", "Other")
-            amt  = float(row.get("total_amount") or 0)
-            text = f"User {user_name} spent ₹{amt:,.2f} on {cat} across {row.get('txn_count')} transactions"
-            vectors.append({
-                "id":     f"{user_id}-cat-{cat.replace(' ','-')}",
-                "values": _embed(text),
-                "metadata": {"user_id": user_id, "type": "category", "text": text, "category": cat, "amount": amt}
-            })
-
-        # Store transaction chunks (every 50 txns)
-        chunk_size = 50
-        for i in range(0, min(len(txns), 500), chunk_size):
-            chunk     = txns[i:i+chunk_size]
-            text_rows = []
-            for t in chunk:
-                date = str(t.get("txn_date") or "")[:10]
-                text_rows.append(f"{date} {t.get('txn_type')} ₹{float(t.get('amount') or 0):,.0f} {t.get('category')} {t.get('narration','')[:30]}")
-            text = "\n".join(text_rows)
-            vectors.append({
-                "id":     f"{user_id}-txn-chunk-{i}",
-                "values": _embed(text),
-                "metadata": {"user_id": user_id, "type": "transactions", "text": text[:500]}
-            })
-
-        if vectors:
-            index.upsert(vectors=vectors)
-            logger.info("✅ Stored %d vectors for user=%s", len(vectors), user_id)
+        from app.services.vector_store import upsert_user_vectors
+        upsert_user_vectors(user_id, user_name)
     except Exception as e:
-        logger.warning("Vector store failed (non-critical): %s", e)
+        logger.warning("Vector upsert (delegated) failed: %s", e)
 
 
 # ── Chat ──────────────────────────────────────────────────────────────────────
 
+SYSTEM_PROMPT_BASE = """You are Penny, FinSight's expert personal finance AI assistant.
+You MUST follow these rules at all times:
+1. Use ONLY the provided [DB FACTS] and [CONTEXT] below. Never hallucinate numbers.
+2. State clearly if a data point is unavailable.
+3. Never give speculative investment advice (no stock picks).
+4. Be concise — 3-5 lines max unless the user explicitly asks for detail.
+5. Use ₹ for Indian Rupees and Indian numbering (lakhs/crores).
+6. Always end with one actionable tip grounded in the user's actual data."""
+
+
+def build_base_financial_snapshot(user_id: str, user_name: str) -> str:
+    """
+    Always-present base context: accounts, current month totals, 3-month trend.
+    Kept under ~600 tokens to leave room for intent facts.
+    """
+    from app.core.db_config import (
+        get_user_accounts, get_user_summary, get_category_breakdown,
+        get_user_budgets, get_six_month_trend, get_account_wise_category_breakdown
+    )
+    from datetime import datetime
+    now = datetime.now()
+    month, year = now.month, now.year
+
+    try:
+        accounts  = get_user_accounts(user_id)
+        summary   = get_user_summary(user_id, month=month, year=year)
+        trend     = get_six_month_trend(user_id)
+        budgets   = get_user_budgets(user_id)
+        breakdown = get_category_breakdown(user_id, month=month, year=year)
+    except Exception as e:
+        logger.warning("Base snapshot failed: %s", e)
+        return f"User: {user_name}. Financial data temporarily unavailable."
+
+    inc  = float(summary.get("total_income") or 0)
+    exp  = float(summary.get("total_expenses") or 0)
+    bal  = float(summary.get("total_balance") or 0)
+    net  = inc - exp
+    rate = round((net / inc * 100), 1) if inc > 0 else 0
+    acc_count = summary.get("account_count", len(accounts))
+
+    lines = [
+        f"[BASE SNAPSHOT — {now.strftime('%B %Y')}]",
+        f"User: {user_name} | Linked Accounts: {acc_count}",
+        f"Total Balance (all accounts): \u20b9{bal:,.0f}",
+        f"This Month: Income \u20b9{inc:,.0f} | Expenses \u20b9{exp:,.0f} | Net \u20b9{net:,.0f} | Savings Rate {rate}%",
+        "",
+    ]
+
+    # Accounts list
+    if accounts:
+        lines.append("[ACCOUNTS]")
+        for a in accounts:
+            atype = a.get("account_type", "")
+            masked = a.get("masked_acc_number", "")
+            ab = float((a.get("current_balance") or a.get("current_value") or a.get("principal_amount") or 0))
+            maturity = f" | Matures: {str(a.get('maturity_date',''))[:10]}" if a.get("maturity_date") else ""
+            rate_txt = f" | Rate: {a.get('interest_rate')}%" if a.get("interest_rate") else ""
+            lines.append(f"\u2022 {atype} {masked}: \u20b9{ab:,.0f}{maturity}{rate_txt}")
+        lines.append("")
+
+    # Per-account category breakdown (only when 2+ accounts — this is the key fix)
+    if len(accounts) >= 2:
+        try:
+            acc_breakdowns = get_account_wise_category_breakdown(user_id, month=month, year=year)
+            if acc_breakdowns:
+                lines.append("[SPENDING BY ACCOUNT THIS MONTH]")
+                for ab_data in acc_breakdowns:
+                    top_cats = ab_data.get("categories", [])[:4]
+                    if not top_cats:
+                        continue
+                    cats_str = " | ".join([
+                        f"{c['category']} \u20b9{c['spent']:,.0f}"
+                        for c in top_cats
+                    ])
+                    lines.append(
+                        f"\u2022 {ab_data['account_type']} {ab_data['masked_acc_number']}: {cats_str}"
+                    )
+                lines.append("")
+        except Exception as e:
+            logger.warning("Per-account breakdown in snapshot failed: %s", e)
+
+    # Active budgets summary
+    if budgets:
+        cat_spent = {r.get("category",""): float(r.get("spent") or 0) for r in breakdown.get("breakdown",[])}
+        lines.append("[ACTIVE GOALS & BUDGETS]")
+        for b in budgets:
+            cat = b.get("category") or "Global"
+            tgt = float(b.get("target_amount") or 0)
+            act = cat_spent.get(cat, 0)
+            pct = round(act/tgt*100, 0) if tgt > 0 else 0
+            exceeded = " \u26a0\ufe0f EXCEEDED" if act > tgt else ""
+            lines.append(f"\u2022 {b.get('goal_type')} | {b.get('title') or cat}: \u20b9{act:,.0f}/\u20b9{tgt:,.0f} ({pct}%){exceeded}")
+        lines.append("")
+
+    # Top 5 categories (merged across all accounts)
+    cats = breakdown.get("breakdown", [])[:5]
+    if cats:
+        lines.append("[TOP SPENDING CATEGORIES — ALL ACCOUNTS]")
+        for c in cats:
+            txn_cnt = c.get('txn_count', '')
+            cnt_txt = f" ({txn_cnt} txns)" if txn_cnt else ""
+            lines.append(f"\u2022 {c.get('category','?')}: \u20b9{float(c.get('spent') or 0):,.0f}{cnt_txt}")
+        lines.append("")
+
+    # 3-month income/expense trend (most recent first)
+    recent_trend = trend[-3:] if trend else []
+    if recent_trend:
+        lines.append("[3-MONTH TREND]")
+        for t in recent_trend:
+            ti = float(t.get("total_income") or 0)
+            te = float(t.get("total_expenses") or 0)
+            lines.append(f"\u2022 {t.get('month')}: In \u20b9{ti:,.0f} / Out \u20b9{te:,.0f}")
+
+    # Recent transactions (last 30 across all accounts with account context)
+    try:
+        from app.core.db_config import get_transactions_filtered
+        recent_txns = get_transactions_filtered(
+            user_id,
+            month=month, year=year,
+            limit=30
+        )
+        if not recent_txns:
+            # Fall back to all-time last 20 if no transactions this month
+            recent_txns = get_transactions_filtered(user_id, limit=20)
+        if recent_txns:
+            lines.append("")
+            lines.append(f"[RECENT TRANSACTIONS — {now.strftime('%B %Y')}]")
+            for t in recent_txns:
+                bal_str = f" | Bal \u20b9{t.get('balance_after'):,.0f}" if t.get('balance_after') else ""
+                narr = str(t.get('narration', ''))[:40]
+                lines.append(
+                    f"\u2022 {t.get('txn_date')} | "
+                    f"{t.get('account_type','?')} {t.get('masked_acc_number','?')} | "
+                    f"{t.get('txn_type','?')} \u20b9{t.get('amount', 0):,.0f} | "
+                    f"{t.get('category','?')} | {narr}{bal_str}"
+                )
+    except Exception as e:
+        logger.warning("Recent transactions in snapshot failed: %s", e)
+
+    return "\n".join(lines)
+
+
+
+def build_slim_system_prompt(user_name: str, base_snapshot: str, db_facts_str: str, pinecone_chunks: list) -> str:
+    """Build system prompt: base rules + always-on snapshot + intent-specific facts + semantic context."""
+    ctx = f"{SYSTEM_PROMPT_BASE}\n\n{base_snapshot}\n"
+    if db_facts_str:
+        ctx += f"\n{db_facts_str}\n"
+    if pinecone_chunks:
+        ctx += "\n[SEMANTIC CONTEXT]\n"
+        for chunk in pinecone_chunks[:2]:
+            ctx += f"• {chunk[:180]}\n"
+    return ctx
+
+
 def chat_with_penny(
     user_id:   str,
     user_name: str,
-    messages:  List[Dict],   # [{role, content}, ...]
+    messages:  List[Dict],
     question:  str,
-) -> str:
-    """Main chat function. Builds context, calls Groq."""
-    system_ctx = build_user_context(user_id, user_name)
+    stream:    bool = False,
+):
+    """
+    Hybrid RAG chat pipeline:
+    1. Classify intent (keyword rules → LLM fallback)
+    2. Resolve exact DB facts for that intent
+    3. Retrieve relevant Pinecone chunks
+    4. Build tight system prompt (~1200 tokens total)
+    5. Call Groq with streaming or one-shot
+    Returns: string response OR generator (if stream=True)
+    """
+    from app.services.intent_router import classify_intent, resolve_intent, format_db_facts
+    from app.services.vector_store import retrieve_relevant_chunks
 
-    full_messages = [{"role": "system", "content": system_ctx}]
-    # Last 10 turns for conversation history
-    for m in messages[-10:]:
+    # Step 1: Detect intent — for compound/analysis questions resolve multiple intents
+    try:
+        intent = classify_intent(question)
+        logger.info("Intent: %s | User: %s", intent, user_id)
+    except Exception:
+        intent = "general"
+
+    # Step 2: Exact DB lookup — also pull comparison facts for analysis intents
+    try:
+        db_facts = resolve_intent(intent, user_id, question)
+        db_facts_str = format_db_facts(db_facts)
+        # For analysis/health/general add extra facts from a secondary intent
+        secondary_intent_map = {
+            "financial_health":     "comparison_query",
+            "general":              "spending_summary",
+            "savings_analysis":     "goal_progress",
+            "comparison_query":     "category_spending",
+            "pattern_analysis":     "spending_summary",
+            "category_spending":    "transaction_lookup",  # adds sample txns for context
+        }
+        if intent in secondary_intent_map:
+            sec_intent = secondary_intent_map[intent]
+            sec_facts = resolve_intent(sec_intent, user_id, question)
+            sec_str = format_db_facts(sec_facts)
+            if sec_str:
+                db_facts_str += "\n" + sec_str
+    except Exception as e:
+        logger.warning("DB resolution failed: %s", e)
+        db_facts_str = ""
+
+    # Step 3: Always-on base snapshot (accounts, totals, budgets, categories, trend)
+    try:
+        base_snapshot = build_base_financial_snapshot(user_id, user_name)
+    except Exception as e:
+        logger.warning("Base snapshot failed: %s", e)
+        base_snapshot = f"User: {user_name}"
+
+    # Step 4: Pinecone semantic retrieval
+    try:
+        pinecone_chunks = retrieve_relevant_chunks(user_id, question, top_k=3)
+    except Exception:
+        pinecone_chunks = []
+
+    # Step 5: Build system prompt
+    system_prompt = build_slim_system_prompt(user_name, base_snapshot, db_facts_str, pinecone_chunks)
+
+    # Step 6: Assemble messages (last 6 turns max)
+    full_messages = [{"role": "system", "content": system_prompt}]
+    for m in messages[-6:]:
         full_messages.append({"role": m["role"], "content": m["content"]})
     full_messages.append({"role": "user", "content": question})
 
-    return _llm(full_messages, temperature=0.7, max_tokens=800)
+    return _llm(full_messages, temperature=0.4, max_tokens=700, stream=stream), intent
 
 
 # ── Bank Statement Parser ─────────────────────────────────────────────────────

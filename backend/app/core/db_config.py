@@ -75,44 +75,89 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
     txn_type = (txn_type or "").upper()
     n = (narration or "").upper()
 
-    # --- Income / Salary ---
+    # --- Income / Salary (CREDIT type checks first) ---
     if txn_type == "CREDIT":
         if any(w in n for w in ["SALARY", "SAL ", "PAYROLL", "WAGE", "STIPEND", "BONUS", "NPS"]):
             return ("Salary & Income", "Salary/Payroll")
         if any(w in n for w in ["REFUND", "CASHBACK", "REVERSAL", "REBATE", "CASH BACK", "SETTLEMENT", "SCRATCH"]):
             return ("Salary & Income", "Refund/Cashback")
 
+    # --- EMI / Loan Repayment (check before transfers to catch NACH/ECS) ---
+    if any(w in n for w in ["EMI", "LOAN REPAY", "HOME LOAN", "CAR LOAN", "PERSONAL LOAN",
+                             "NACH EMI", "ECS EMI", "BAJAJ FIN", "FULLERTON", "LOANDEAL"]):
+        return ("EMI & Loans", "Loan/EMI Repayment")
+
+    # --- Insurance ---
+    if any(w in n for w in ["LIC ", "HDFC LIFE", "SBI LIFE", "BAJAJ ALLIANZ", "MAX LIFE",
+                             "ICICI PRU", "KOTAK LIFE", "TATA AIA", "STAR HEALTH", "INSURANCE",
+                             "NIVA BUPA", "CARE HEALTH", "GENERAL INS"]):
+        return ("Insurance", "Insurance Premium")
+
+    # --- Investments & Savings ---
+    if any(w in n for w in ["ZERODHA", "GROWW", "ANGEL BROKING", "UPSTOX", "COIN BY ZERODHA",
+                             "MUTUAL FUND", "MF INVEST", " SIP ", "KUVERA", "SCRIPBOX",
+                             "PAYTM MONEY", "GOLD INVEST", "SMALLCASE", "DEMAT"]):
+        return ("Investments & Savings", "Investments")
+
     # --- Food & Dining ---
-    if any(w in n for w in ["RESTAURANT", "CAFE", "ZOMATO", "SWIGGY", "MCDONALD", "KFC", "PIZZA", "DOMINO"]):
+    if any(w in n for w in ["RESTAURANT", "CAFE", "ZOMATO", "SWIGGY", "MCDONALD", "KFC",
+                             "PIZZA", "DOMINO", "BURGER KING", "SUBWAY", "STARBUCKS", "CCD"]):
         return ("Food & Dining", "Restaurants/Cafe")
-    if any(w in n for w in ["GROCERY", "DMART", "RELIANCE FRESH", "JIOMART", "BLINKIT", "ZEPTO", "INSTAMART"]):
+    if any(w in n for w in ["GROCERY", "DMART", "RELIANCE FRESH", "JIOMART", "BLINKIT",
+                             "ZEPTO", "INSTAMART", "BIGBASKET", "GROFERS", "MORE RETAIL"]):
         return ("Food & Dining", "Groceries")
 
+    # --- Healthcare & Medical ---
+    if any(w in n for w in ["APOLLO", "MEDPLUS", "PRACTO", "PHARMEASY", "NETMEDS", "HOSPITAL",
+                             "CLINIC", "DOCTOR", "PHARMACY", "MEDICINE", "MEDICAL",
+                             "THYROCARE", "LENSKART", "HEALTHKART", "NARAYANA", "FORTIS"]):
+        return ("Healthcare", "Healthcare/Medical")
+
+    # --- Education ---
+    if any(w in n for w in ["BYJU", "UNACADEMY", "COURSERA", "UDEMY", "SKILL INDIA",
+                             "SCHOOL FEE", "COLLEGE FEE", "TUITION", "ACADEMIC", "UNIVERSITY",
+                             "VEDANTU", "SIMPLILEARN", "UPGRAD", "WHITEHAT", "TOPPR"]):
+        return ("Education", "Education/Courses")
+
+    # --- Entertainment & Subscriptions ---
+    if any(w in n for w in ["NETFLIX", "PRIME VIDEO", "HOTSTAR", "SPOTIFY", "YOUTUBE PREMIUM",
+                             "APPLE MUSIC", "AMAZON PRIME", "DISNEY PLUS", "GAANA", "JIOSAAVN",
+                             "MULTIPLEX", "PVR", "INOX", "BOOKMYSHOW", "SONYLIV", "VOOT"]):
+        return ("Entertainment", "Entertainment/Subscriptions")
+
     # --- Transportation ---
-    if any(w in n for w in ["PETROL", "FUEL", "HPCL", "BPCL", "IOCL", "SHELL"]):
+    if any(w in n for w in ["PETROL", "FUEL", "HPCL", "BPCL", "IOCL", "SHELL", "INDIAN OIL"]):
         return ("Transportation", "Fuel")
-    if any(w in n for w in ["UBER", "OLA", "RAPIDO", "TAXI", "CAB"]):
+    if any(w in n for w in ["UBER", "OLA ", "RAPIDO", "TAXI", " CAB ", "PORTER", "BLUEDART"]):
         return ("Transportation", "Taxi/Ride Hailing")
-    if any(w in n for w in ["METRO", "IRCTC", "REDBUS", "BUS", "PARKING", "TOLL", "FASTAG"]):
-        return ("Transportation", "Public Transport")
+    if any(w in n for w in ["METRO", "IRCTC", "REDBUS", "KSRTC", "PARKING", "TOLL", "FASTAG",
+                             "MAKEMYTRIP", "GOIBIBO", "CLEARTRIP", "YATRA"]):
+        return ("Transportation", "Public Transport & Travel")
 
     # --- Shopping & Retail ---
-    if any(w in n for w in ["AMAZON", "FLIPKART", "MYNTRA", "AJIO", "MEESHO", "NYKAA"]):
+    if any(w in n for w in ["AMAZON", "FLIPKART", "MYNTRA", "AJIO", "MEESHO", "NYKAA",
+                             "TATA CLIQ", "SNAPDEAL", "SHOPIFY", "SHEIN", "LIFESTYLE"]):
         return ("Shopping & Retail", "E-commerce")
-    
+
     # --- Bills & Utilities ---
-    if any(w in n for w in ["ELECTRICITY", "WATER BILL", "GAS BILL", "INTERNET", "BROADBAND", "AIRTEL", "JIO", "VODAFONE"]):
+    if any(w in n for w in ["ELECTRICITY", "WATER BILL", "GAS BILL", "INTERNET", "BROADBAND",
+                             "AIRTEL", "JIO ", "VODAFONE", "BSNL", "TATA POWER", "MSEDCL",
+                             "BESCOM", "RELIANCE GAS", "MAHANAGAR GAS"]):
         return ("Bills & Utilities", "Utilities/BillPay")
 
-    # --- Transfers ---
-    if any(w in n for w in ["UPI", "NEFT", "RTGS", "IMPS", "TRANSFER", "FUND TRANSFER"]):
-        return ("Transfers", "Transfers")
+    # --- Transfers (last, after all specific checks) ---
+    if any(w in n for w in ["NEFT", "RTGS", "IMPS", "FUND TRANSFER"]):
+        return ("Transfers", "Bank Transfer")
+    if "UPI" in n:
+        return ("Transfers", "UPI Transfer")
 
-    # Overrides
+    # Overrides by transaction type
     type_map = {
         "INTEREST":   ("Investments & Savings", "Interest Income"),
         "TDS":        ("Taxes & Government",    "Tax Deducted at Source"),
         "OPENING":    ("Account",               "Account Opening"),
+        "RENEWAL":    ("Investments & Savings", "FD/RD Renewal"),
+        "REDEMPTION": ("Investments & Savings", "FD/RD Redemption"),
     }
     if txn_type in type_map:
         return type_map[txn_type]
@@ -121,8 +166,9 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
         return ("Salary & Income", "Credit")
     if txn_type == "DEBIT":
         return ("Uncategorized / Unknown", "Debit")
-    
+
     return ("Uncategorized / Unknown", "Other")
+
 
 
 def init_database():
@@ -531,7 +577,8 @@ def get_user_summary(user_id: str, month: int = None, year: int = None, fi_data_
         return {
             "total_balance":  total_bal,
             "total_income":   float(res["total_income"]),
-            "total_expenses": float(res["total_expenses"])
+            "total_expenses": float(res["total_expenses"]),
+            "account_count":  len(acc_ids),
         }
     finally:
         cur.close(); conn.close()
@@ -577,14 +624,17 @@ def get_user_range_summary(user_id: str, sm: int, sy: int, em: int, ey: int, fi_
         cur.close(); conn.close()
 
 
-def get_category_breakdown(user_id: str, month: int = None, year: int = None) -> Dict:
+def get_category_breakdown(user_id: str, month: int = None, year: int = None, fi_data_id: int = None) -> Dict:
     conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
     try:
-        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD','FEES','CHARGES','TAX','OTHERS')
+        # Include OTHERS and REDEMPTION so AA-synced transactions are never silently excluded
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD',
+                         'FEES','CHARGES','TAX','OTHERS','REDEMPTION')
         query = """
             SELECT
                 category,
-                SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) AS spent
+                SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) AS spent,
+                COUNT(*) AS txn_count
             FROM transactions
             WHERE user_id = %s
         """
@@ -592,10 +642,72 @@ def get_category_breakdown(user_id: str, month: int = None, year: int = None) ->
         if month and year:
             query += " AND EXTRACT(MONTH FROM txn_date) = %s AND EXTRACT(YEAR FROM txn_date) = %s"
             params.extend([month, year])
-        query += " GROUP BY category ORDER BY spent DESC"
-        cur.execute(query, tuple([expense_types] + params))
+        if fi_data_id:
+            query += " AND fi_data_id = %s"
+            params.append(fi_data_id)
+        query += " GROUP BY category HAVING SUM(CASE WHEN txn_type IN %s THEN amount ELSE 0 END) > 0 ORDER BY spent DESC"
+        params.append(fi_data_id if fi_data_id else user_id)  # placeholder — handled below
+        # Rebuild params cleanly with two expense_types references
+        params_clean = [expense_types, user_id]
+        if month and year:
+            params_clean.extend([month, year])
+        if fi_data_id:
+            params_clean.append(fi_data_id)
+        params_clean.append(expense_types)
+        cur.execute(query, tuple(params_clean))
         rows = cur.fetchall()
         return {"breakdown": [dict(r) for r in rows]}
+    finally:
+        cur.close(); conn.close()
+
+
+def get_account_wise_category_breakdown(user_id: str, month: int = None, year: int = None) -> List[Dict]:
+    """
+    Returns per-account category spending breakdown.
+    Used by Penny to answer 'show me categories for all my accounts'.
+    """
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD',
+                         'FEES','CHARGES','TAX','OTHERS','REDEMPTION')
+        query = """
+            SELECT
+                f.fi_data_id,
+                f.masked_acc_number,
+                f.account_type,
+                t.category,
+                SUM(t.amount) AS spent,
+                COUNT(*) AS txn_count
+            FROM transactions t
+            JOIN fi_data f ON t.fi_data_id = f.fi_data_id
+            WHERE t.user_id = %s AND t.txn_type IN %s
+        """
+        params = [user_id, expense_types]
+        if month and year:
+            query += " AND EXTRACT(MONTH FROM t.txn_date) = %s AND EXTRACT(YEAR FROM t.txn_date) = %s"
+            params.extend([month, year])
+        query += " GROUP BY f.fi_data_id, f.masked_acc_number, f.account_type, t.category"
+        query += " HAVING SUM(t.amount) > 0 ORDER BY f.fi_data_id, spent DESC"
+        cur.execute(query, tuple(params))
+        rows = [dict(r) for r in cur.fetchall()]
+
+        # Group by account
+        from collections import defaultdict
+        acc_map = defaultdict(lambda: {"fi_data_id": None, "masked_acc_number": "", "account_type": "", "categories": []})
+        for r in rows:
+            key = r["fi_data_id"]
+            acc_map[key]["fi_data_id"] = r["fi_data_id"]
+            acc_map[key]["masked_acc_number"] = r["masked_acc_number"]
+            acc_map[key]["account_type"] = r["account_type"]
+            acc_map[key]["categories"].append({
+                "category": r["category"],
+                "spent": float(r["spent"]),
+                "txn_count": r["txn_count"]
+            })
+        return list(acc_map.values())
+    except Exception as e:
+        logger.error("Account-wise category breakdown failed: %s", e)
+        return []
     finally:
         cur.close(); conn.close()
 def get_category_drilldown(user_id: str, category: str, month: int = None, year: int = None) -> Dict:
@@ -763,3 +875,337 @@ def get_largest_transactions(user_id: str, limit: int = 5) -> list[dict]:
         cur.close(); conn.close()
 
 
+
+# ── Deep Transaction Access for Penny ────────────────────────────────────────
+
+def get_transactions_filtered(
+    user_id: str,
+    fi_data_id: int = None,
+    category: str = None,
+    subcategory: str = None,
+    month: int = None,
+    year: int = None,
+    keyword: str = None,
+    txn_type_filter: str = None,   # "income" | "expense" | None (both)
+    min_amount: float = None,
+    max_amount: float = None,
+    limit: int = 40,
+) -> List[Dict]:
+    """
+    Flexible transaction query for Penny's transaction_lookup intent.
+    Supports filtering by account, category, subcategory, date, narration keyword,
+    transaction type (income/expense), and amount range.
+    Returns list of transactions with full context (account, narration, amount, date, category).
+    """
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        income_types  = ('CREDIT','INTEREST','OPENING','REFUND','DEPOSIT','INWARD','REVERSAL')
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD',
+                         'FEES','CHARGES','TAX','OTHERS','REDEMPTION')
+
+        query = """
+            SELECT
+                t.txn_id,
+                t.txn_date,
+                t.amount,
+                t.txn_type,
+                t.payment_mode,
+                t.narration,
+                t.category,
+                t.subcategory,
+                t.balance_after,
+                f.masked_acc_number,
+                f.account_type
+            FROM transactions t
+            JOIN fi_data f ON t.fi_data_id = f.fi_data_id
+            WHERE t.user_id = %s
+        """
+        params = [user_id]
+
+        if fi_data_id:
+            query += " AND t.fi_data_id = %s"
+            params.append(fi_data_id)
+
+        if category:
+            query += " AND LOWER(TRIM(t.category)) = LOWER(TRIM(%s))"
+            params.append(category)
+
+        if subcategory:
+            query += " AND LOWER(TRIM(t.subcategory)) = LOWER(TRIM(%s))"
+            params.append(subcategory)
+
+        if month and year:
+            query += " AND EXTRACT(MONTH FROM t.txn_date) = %s AND EXTRACT(YEAR FROM t.txn_date) = %s"
+            params.extend([month, year])
+
+        if keyword:
+            query += " AND UPPER(t.narration) LIKE UPPER(%s)"
+            params.append(f"%{keyword}%")
+
+        if txn_type_filter == "income":
+            query += " AND t.txn_type IN %s"
+            params.append(income_types)
+        elif txn_type_filter == "expense":
+            query += " AND t.txn_type IN %s"
+            params.append(expense_types)
+
+        if min_amount is not None:
+            query += " AND t.amount >= %s"
+            params.append(min_amount)
+
+        if max_amount is not None:
+            query += " AND t.amount <= %s"
+            params.append(max_amount)
+
+        query += " ORDER BY t.txn_date DESC LIMIT %s"
+        params.append(limit)
+
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d['amount'] = float(d['amount'] or 0)
+            d['balance_after'] = float(d['balance_after'] or 0) if d.get('balance_after') else None
+            d['txn_date'] = str(d['txn_date'])[:10] if d.get('txn_date') else ''
+            results.append(d)
+        return results
+    except Exception as e:
+        logger.error("get_transactions_filtered failed: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_subcategory_breakdown(user_id: str, month: int = None, year: int = None,
+                               category: str = None) -> List[Dict]:
+    """
+    Returns granular subcategory spending breakdown.
+    Optionally filtered by parent category and month.
+    """
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        expense_types = ('DEBIT','TDS','PAYMENT','INSTALLMENT','WITHDRAWAL','OUTWARD',
+                         'FEES','CHARGES','TAX','OTHERS','REDEMPTION')
+        query = """
+            SELECT
+                category,
+                subcategory,
+                SUM(amount) AS spent,
+                COUNT(*) AS txn_count
+            FROM transactions
+            WHERE user_id = %s AND txn_type IN %s AND amount > 0
+        """
+        params = [user_id, expense_types]
+
+        if category:
+            query += " AND LOWER(TRIM(category)) = LOWER(TRIM(%s))"
+            params.append(category)
+
+        if month and year:
+            query += " AND EXTRACT(MONTH FROM txn_date) = %s AND EXTRACT(YEAR FROM txn_date) = %s"
+            params.extend([month, year])
+
+        query += " GROUP BY category, subcategory ORDER BY spent DESC"
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        return [
+            {**dict(r), 'spent': float(r['spent'] or 0)}
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error("get_subcategory_breakdown failed: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def search_transactions_by_keyword(user_id: str, keyword: str, limit: int = 20) -> List[Dict]:
+    """
+    Full-text search through transaction narrations.
+    Used by Penny when user asks 'find my Netflix transactions' or 'show swiggy payments'.
+    """
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT
+                t.txn_date,
+                t.amount,
+                t.txn_type,
+                t.narration,
+                t.category,
+                t.subcategory,
+                f.masked_acc_number,
+                f.account_type
+            FROM transactions t
+            JOIN fi_data f ON t.fi_data_id = f.fi_data_id
+            WHERE t.user_id = %s AND UPPER(t.narration) LIKE UPPER(%s)
+            ORDER BY t.txn_date DESC
+            LIMIT %s
+        """, (user_id, f"%{keyword}%", limit))
+        rows = cur.fetchall()
+        return [
+            {**dict(r), 'amount': float(r['amount'] or 0),
+             'txn_date': str(r['txn_date'])[:10] if r.get('txn_date') else ''}
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error("search_transactions_by_keyword failed: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+def get_account_transactions(user_id: str, masked_acc: str = None,
+                              account_type: str = None,
+                              month: int = None, year: int = None,
+                              limit: int = 30) -> List[Dict]:
+    """
+    Per-account transaction history — used when user asks about a specific account.
+    Matches by masked account number (partial ok) or account type.
+    """
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        query = """
+            SELECT
+                t.txn_date,
+                t.amount,
+                t.txn_type,
+                t.narration,
+                t.category,
+                t.subcategory,
+                t.balance_after,
+                f.masked_acc_number,
+                f.account_type
+            FROM transactions t
+            JOIN fi_data f ON t.fi_data_id = f.fi_data_id
+            WHERE t.user_id = %s
+        """
+        params = [user_id]
+
+        if masked_acc:
+            query += " AND UPPER(f.masked_acc_number) LIKE UPPER(%s)"
+            params.append(f"%{masked_acc[-4:]}%")  # match last 4 digits
+
+        if account_type:
+            query += " AND UPPER(f.account_type) = UPPER(%s)"
+            params.append(account_type)
+
+        if month and year:
+            query += " AND EXTRACT(MONTH FROM t.txn_date) = %s AND EXTRACT(YEAR FROM t.txn_date) = %s"
+            params.extend([month, year])
+
+        query += " ORDER BY t.txn_date DESC LIMIT %s"
+        params.append(limit)
+
+        cur.execute(query, tuple(params))
+        rows = cur.fetchall()
+        return [
+            {**dict(r),
+             'amount': float(r['amount'] or 0),
+             'balance_after': float(r['balance_after'] or 0) if r.get('balance_after') else None,
+             'txn_date': str(r['txn_date'])[:10] if r.get('txn_date') else ''}
+            for r in rows
+        ]
+    except Exception as e:
+        logger.error("get_account_transactions failed: %s", e)
+        return []
+    finally:
+        cur.close(); conn.close()
+
+
+# ── Chat History & Feedback ────────────────────────────────────────────────────
+
+def init_penny_tables():
+    """Create penny_chat_history and penny_feedback tables if they don't exist."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS penny_chat_history (
+                id          SERIAL PRIMARY KEY,
+                user_id     VARCHAR(255) NOT NULL,
+                role        VARCHAR(20) NOT NULL,
+                content     TEXT NOT NULL,
+                intent      VARCHAR(50),
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_chat_user ON penny_chat_history(user_id)")
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS penny_feedback (
+                id          SERIAL PRIMARY KEY,
+                user_id     VARCHAR(255) NOT NULL,
+                message_id  INTEGER REFERENCES penny_chat_history(id),
+                helpful     BOOLEAN,
+                comment     TEXT,
+                created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        logger.info("Penny tables initialized.")
+    except Exception as e:
+        conn.rollback(); logger.error("Penny table init failed: %s", e)
+    finally:
+        cur.close(); conn.close()
+
+
+def save_chat_message(user_id: str, role: str, content: str, intent: str = None) -> int:
+    """Save a single chat message and return its ID."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO penny_chat_history(user_id, role, content, intent) VALUES(%s,%s,%s,%s) RETURNING id",
+            (user_id, role, content, intent)
+        )
+        msg_id = cur.fetchone()[0]
+        conn.commit()
+        return msg_id
+    except Exception as e:
+        conn.rollback(); logger.error("save_chat_message failed: %s", e); return -1
+    finally:
+        cur.close(); conn.close()
+
+
+def get_chat_history(user_id: str, limit: int = 50) -> list[dict]:
+    """Fetch last N messages, oldest first."""
+    conn = get_connection(); cur = conn.cursor(cursor_factory=extras.RealDictCursor)
+    try:
+        cur.execute("""
+            SELECT id, role, content, intent, created_at
+            FROM penny_chat_history
+            WHERE user_id = %s
+            ORDER BY created_at DESC LIMIT %s
+        """, (user_id, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+        return list(reversed(rows))
+    except Exception as e:
+        logger.error("get_chat_history failed: %s", e); return []
+    finally:
+        cur.close(); conn.close()
+
+
+def clear_chat_history(user_id: str):
+    """Delete all chat messages for a user."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute("DELETE FROM penny_chat_history WHERE user_id = %s", (user_id,))
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); logger.error("clear_chat_history failed: %s", e)
+    finally:
+        cur.close(); conn.close()
+
+
+def save_feedback(user_id: str, message_id: int, helpful: bool, comment: str = None):
+    """Store thumbs up/down feedback on a Penny message."""
+    conn = get_connection(); cur = conn.cursor()
+    try:
+        cur.execute(
+            "INSERT INTO penny_feedback(user_id, message_id, helpful, comment) VALUES(%s,%s,%s,%s)",
+            (user_id, message_id, helpful, comment)
+        )
+        conn.commit()
+    except Exception as e:
+        conn.rollback(); logger.error("save_feedback failed: %s", e)
+    finally:
+        cur.close(); conn.close()

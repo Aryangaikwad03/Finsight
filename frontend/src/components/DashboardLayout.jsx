@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import PennyChatPanel from './PennyChatPanel'
 
 export default function DashboardLayout({ title = 'Dashboard', rightElement = null, children }) {
   const { user, logout } = useAuth()
@@ -143,6 +144,8 @@ export default function DashboardLayout({ title = 'Dashboard', rightElement = nu
           {children}
         </main>
       </div>
+      {/* Penny — floats on every page */}
+      <PennyChatPanel />
     </div>
   )
 }
