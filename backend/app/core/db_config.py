@@ -836,14 +836,16 @@ def get_recurring_expenses(user_id: str) -> list[dict]:
         query = """
             SELECT 
                 SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30) as merchant,
+                category,
                 ROUND(AVG(amount), 2) as avg_amount,
                 COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) as months_active
             FROM transactions
             WHERE user_id = %s AND amount > 0 AND txn_type IN %s
-            GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30)
-            HAVING COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) >= 2 
-               AND (MAX(amount) - MIN(amount)) / NULLIF(AVG(amount), 0) < 0.1
-            ORDER BY avg_amount DESC LIMIT 10
+            GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30), category
+            HAVING (COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) >= 3 
+               AND (MAX(amount) - MIN(amount)) / NULLIF(AVG(amount), 0) < 0.2)
+               OR category IN ('Subscription Services', 'Housing & Rent', 'Insurance', 'EMI & Loans', 'Entertainment & Leisure')
+            ORDER BY avg_amount DESC LIMIT 15
         """
         cur.execute(query, (user_id, expense_types))
         return [dict(r) for r in cur.fetchall()]
@@ -863,7 +865,6 @@ def get_largest_transactions(user_id: str, limit: int = 5) -> list[dict]:
             SELECT txn_date, amount, category, narration
             FROM transactions
             WHERE user_id = %s AND txn_type IN %s 
-              AND txn_date >= DATE_TRUNC('month', CURRENT_DATE)
             ORDER BY amount DESC LIMIT %s
         """
         cur.execute(query, (user_id, expense_types, limit))

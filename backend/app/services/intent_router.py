@@ -69,7 +69,7 @@ def classify_intent(question: str) -> str:
     if any(w in q for w in ["financial health", "health score", "rate my", "am i doing well", "overall score"]):
         return "financial_health"
     if any(w in q for w in ["pattern", "habit", "behaviour", "when do i spend", "lifestyle", "impulse",
-                             "weekend spender", "rising categor", "peak day", "inflation score"]):
+                             "weekend spender", "rising categor", "peak day", "inflation score", "unnecessary", "cut down"]):
         return "pattern_analysis"
     # Account transaction lookup (before generic transaction lookup)
     if any(w in q for w in ["in my hdfc", "in my icici", "in my sbi", "in my axis", "in my kotak",
@@ -154,6 +154,7 @@ def resolve_intent(intent: str, user_id: str, question: str) -> Dict[str, Any]:
             pct_change = ((curr_exp - prev_exp) / prev_exp * 100) if prev_exp > 0 else 0
             top_cats = get_category_breakdown(user_id, month=month, year=year)
             top3 = [r.get("category") for r in top_cats.get("breakdown", [])[:3]]
+            trend = get_six_month_trend(user_id)
             return {
                 "intent": intent,
                 "current_month_expenses": curr_exp,
@@ -161,6 +162,7 @@ def resolve_intent(intent: str, user_id: str, question: str) -> Dict[str, Any]:
                 "pct_change_vs_last_month": round(pct_change, 1),
                 "total_income": float(s.get("total_income") or 0),
                 "top_categories": top3,
+                "six_month_trend": trend,
                 "month": month, "year": year
             }
 
@@ -422,6 +424,9 @@ def format_db_facts(facts: Dict[str, Any]) -> str:
         lines.append(f"This month ({facts.get('month')}/{facts.get('year')}): Expenses ₹{facts.get('current_month_expenses', 0):,.0f} | Income ₹{facts.get('total_income', 0):,.0f}")
         lines.append(f"vs Last Month: ₹{facts.get('prev_month_expenses', 0):,.0f} ({facts.get('pct_change_vs_last_month', 0):+.1f}%)")
         lines.append(f"Top categories: {', '.join(facts.get('top_categories', []))}")
+        lines.append("Six Month Trend:")
+        for t in facts.get("six_month_trend", []):
+            lines.append(f"• {t.get('month')}: Spent ₹{float(t.get('total_expenses') or 0):,.0f}")
 
     elif intent == "category_spending":
         for r in facts.get("breakdown", []):
@@ -466,9 +471,17 @@ def format_db_facts(facts: Dict[str, Any]) -> str:
             lines.append(f"• {a['type']} {a['masked']}: ₹{float(a['balance'] or 0):,.0f}")
 
     elif intent == "recurring_payments":
-        lines.append(f"Est. monthly recurring total: ₹{facts.get('estimated_monthly_total', 0):,.0f}")
+        lines.append(f"Database identified recurring total: ₹{facts.get('estimated_monthly_total', 0):,.0f}")
         for r in facts.get("recurring", []):
-            lines.append(f"• {r.get('merchant', '?')}: ~₹{float(r.get('avg_amount') or 0):,.0f}/month")
+            lines.append(f"• {r.get('category', '?')}: ~₹{float(r.get('avg_amount') or 0):,.0f}/month")
+        
+        lines.append("\n[CRITICAL LLM INSTRUCTIONS FOR RECURRING EXPENSES]")
+        lines.append("Identify monthly recurring expenses from transactions (use [RECENT TRANSACTIONS]).")
+        lines.append("Consider a transaction recurring if it appears 3 or more times across months AND the amount is same or very similar.")
+        lines.append("Also include transactions based on keywords even if pattern is not exact: Rent, Subscriptions (Netflix, Prime, Spotify, etc.), Bills & Utilities (electricity, water, mobile recharge, internet), EMI / loan payments.")
+        lines.append("Do not return ₹0 unless absolutely no pattern exists.")
+        lines.append("Return: 1. List of recurring expenses (category + approx monthly amount). 2. Total monthly recurring amount.")
+        lines.append("Keep output simple and clear.")
 
     elif intent == "unusual_transaction":
         for a in facts.get("anomalies", []):
@@ -485,6 +498,14 @@ def format_db_facts(facts: Dict[str, Any]) -> str:
             inc = float(t.get("total_income") or 0)
             exp = float(t.get("total_expenses") or 0)
             lines.append(f"• {t.get('month')}: In ₹{inc:,.0f} / Out ₹{exp:,.0f}")
+            
+        lines.append(f"\nCategory Breakdown ({facts.get('current_month')}):")
+        for c in facts.get("current_month_breakdown", []):
+            lines.append(f"• {c.get('category')}: ₹{float(c.get('spent') or 0):,.0f}")
+            
+        lines.append(f"\nCategory Breakdown ({facts.get('prev_month')}):")
+        for c in facts.get("prev_month_breakdown", []):
+            lines.append(f"• {c.get('category')}: ₹{float(c.get('spent') or 0):,.0f}")
 
     elif intent == "financial_health":
         lines.append(f"Savings Rate: {facts.get('savings_rate', 0)}% | Net: \u20b9{facts.get('net_savings', 0):,.0f}")
