@@ -158,18 +158,24 @@ async def fetch_fi_data_for_consent(
         approved_range = cached_resp.get("detail", {}).get("dataRange", {})
 
         if not (approved_range.get("from") and approved_range.get("to")):
-            logger.warning("Cache miss for %s — re-fetching consent", consent_id)
-            full_consent   = client.get_consent_status(consent_id)
-            approved_range = full_consent.get("detail", {}).get("dataRange", {})
-
-        if not (approved_range.get("from") and approved_range.get("to")):
-            raise ValueError(
-                f"Cannot read approved dataRange for consent {consent_id}. "
-                "Please revoke and create a new consent."
-            )
-
-        data_from = datetime.fromisoformat(approved_range["from"].replace("Z", "+00:00"))
-        data_to   = datetime.fromisoformat(approved_range["to"].replace("Z", "+00:00"))
+            logger.warning("Cache miss for %s — reading dataRange from DB", consent_id)
+            from app.core.db_config import get_connection
+            conn = get_connection(); cur = conn.cursor()
+            cur.execute("SELECT data_range_from, data_range_to FROM consents WHERE consent_id = %s", (consent_id,))
+            row = cur.fetchone()
+            cur.close(); conn.close()
+            
+            if row and row[0] and row[1]:
+                data_from = row[0].replace(tzinfo=timezone.utc)
+                data_to = row[1].replace(tzinfo=timezone.utc)
+            else:
+                raise ValueError(
+                    f"Cannot read approved dataRange for consent {consent_id}. "
+                    "Please revoke and create a new consent."
+                )
+        else:
+            data_from = datetime.fromisoformat(approved_range["from"].replace("Z", "+00:00"))
+            data_to   = datetime.fromisoformat(approved_range["to"].replace("Z", "+00:00"))
 
         now = datetime.now(timezone.utc)
         if data_to > now:

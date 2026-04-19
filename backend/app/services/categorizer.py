@@ -15,7 +15,7 @@ def get_classifier():
 
 def categorize_transaction_ml(narration: str) -> dict:
     if not narration or len(narration.strip()) < 3:
-        return {"category": "Other", "subcategory": "Other"}
+        return "Other"
         
     try:
         classifier = get_classifier()
@@ -25,34 +25,33 @@ def categorize_transaction_ml(narration: str) -> dict:
         
         # Attempt to map model's label directly to our app's broader buckets
         cat_map = {
-            "food": ("Expense", "Food"),
-            "dining": ("Expense", "Food"),
-            "grocer": ("Expense", "Groceries"),
-            "shopping": ("Expense", "Shopping"),
-            "travel": ("Expense", "Travel"),
-            "transportation": ("Expense", "Travel"),
-            "util": ("Expense", "Utilities"),
-            "bill": ("Expense", "Utilities"),
-            "medic": ("Expense", "Healthcare"),
-            "health": ("Expense", "Healthcare"),
-            "entertainment": ("Expense", "Entertainment"),
-            "recreation": ("Expense", "Entertainment"),
-            "rent": ("Expense", "Rent"),
-            "salary": ("Income", "Salary"),
-            "invest": ("Investment", "Investment"),
+            "food": "Food & Dining",
+            "dining": "Food & Dining",
+            "grocer": "Groceries",
+            "shopping": "Shopping & Retail",
+            "travel": "Travel",
+            "transportation": "Travel",
+            "util": "Bills & Utilities",
+            "bill": "Bills & Utilities",
+            "medic": "Healthcare & Medical",
+            "health": "Healthcare & Medical",
+            "entertainment": "Entertainment & Leisure",
+            "recreation": "Entertainment & Leisure",
+            "rent": "Housing & Rent",
+            "salary": "Salary & Income",
+            "invest": "Investments & Savings",
         }
         
         lower_label = label.lower()
-        matched_category = "Expense" # Default most things to Expense
-        matched_sub = label # Keep the raw label for granularity
+        matched_category = "Uncategorized / Unknown" # Default most things to Expense
+         # Keep the raw label for granularity
         
         for k, v in cat_map.items():
             if k in lower_label:
-                matched_category = v[0]
-                matched_sub = v[1]
+                matched_category = v
                 break
                 
-        return {"category": matched_category, "subcategory": matched_sub}
+        return matched_category
     except Exception as e:
         logger.error(f"Classification failed for '{narration}': {e}")
-        return {"category": "Other", "subcategory": "Other"}
+        return "Other"

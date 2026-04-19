@@ -1,24 +1,13 @@
 import { useState } from 'react'
 import { aaAPI } from '../services/api'
 
-const AA_HANDLES = [
-  { value: 'onemoney', label: 'OneMoney',  desc: 'Most widely supported' },
-  { value: 'finvu',    label: 'Finvu',     desc: 'Popular AA provider' },
-  { value: 'anumati',  label: 'Anumati',   desc: 'RBI licensed AA' },
-]
 
-const PRESETS = [
-  { value: 'banking',     label: 'Banking',          desc: 'Deposits, FDs, RDs' },
-  { value: 'investments', label: 'Investments',       desc: 'MF, Equities, NPS, ETF' },
-  { value: 'credit',      label: 'Credit',            desc: 'Credit cards & Loans' },
-  { value: 'all',         label: 'All Data (23 types)', desc: 'Complete financial profile' },
-]
+
 
 export default function ConsentModal({ onClose, onSuccess }) {
   const [step, setStep]       = useState(1)   // 1=form, 2=loading, 3=redirecting
   const [mobile, setMobile]   = useState('')
-  const [handle, setHandle]   = useState('onemoney')
-  const [preset, setPreset]   = useState('banking')
+
   const [error, setError]     = useState('')
 
   const handleCreate = async () => {
@@ -28,7 +17,7 @@ export default function ConsentModal({ onClose, onSuccess }) {
 
     setStep(2)
     try {
-      const { data } = await aaAPI.createConsent({ mobile: digits, aa_handle: handle, preset })
+      const { data } = await aaAPI.createConsent({ mobile: digits, aa_handle: 'onemoney', preset: 'banking' })
 
       // Step 3 — show redirect message briefly then open AA webview
       setStep(3)
@@ -104,72 +93,32 @@ export default function ConsentModal({ onClose, onSuccess }) {
                   </div>
                   <input
                     type="tel"
-                    placeholder="9876543210"
+                    placeholder="1234567890@onemoney"
                     value={mobile}
                     onChange={e => { setMobile(e.target.value); setError('') }}
-                    maxLength={10}
+                    maxLength={20}
                     className="flex-1 border border-slate-200 rounded-r-xl px-4 py-3 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent"
                   />
                 </div>
-                <p className="text-xs text-slate-400 mt-1.5">
+                <p className="text-xs text-slate-400 mt-1.5 mb-4">
                   This should be the mobile number registered with your bank.
                 </p>
-              </div>
 
-              {/* AA Handle */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Account Aggregator</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {AA_HANDLES.map(h => (
-                    <button
-                      key={h.value}
-                      onClick={() => setHandle(h.value)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        handle === h.value
-                          ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <p className={`text-sm font-semibold ${handle === h.value ? 'text-brand-700' : 'text-slate-800'}`}>
-                        {h.label}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">{h.desc}</p>
-                    </button>
-                  ))}
+                {/* Visual indicator for OneMoney */}
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">Account Aggregator</label>
+                  <div className="p-3 rounded-xl border border-brand-500 bg-brand-50 ring-1 ring-brand-500 text-left">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-brand-700">OneMoney</p>
+                        <p className="text-xs text-brand-600/80 mt-0.5">Selected provider</p>
+                      </div>
+                      <svg className="w-5 h-5 text-brand-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
+                      </svg>
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              {/* Preset */}
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">Data to Fetch</label>
-                <div className="grid grid-cols-2 gap-2">
-                  {PRESETS.map(p => (
-                    <button
-                      key={p.value}
-                      onClick={() => setPreset(p.value)}
-                      className={`p-3 rounded-xl border text-left transition-all ${
-                        preset === p.value
-                          ? 'border-brand-500 bg-brand-50 ring-1 ring-brand-500'
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <p className={`text-sm font-semibold ${preset === p.value ? 'text-brand-700' : 'text-slate-800'}`}>
-                        {p.label}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">{p.desc}</p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* RBI note */}
-              <div className="flex items-start gap-3 bg-green-50 border border-green-100 rounded-xl p-3">
-                <svg className="w-4 h-4 text-green-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd"/>
-                </svg>
-                <p className="text-xs text-green-700">
-                  <span className="font-semibold">RBI Regulated.</span> We never store your bank credentials. All data flows through licensed AA partners with your explicit consent.
-                </p>
               </div>
 
               <button

@@ -185,7 +185,6 @@ export default function Dashboard() {
         .filter(b => Number(b.spent) > 0)
         .map(b => [b.category, Number(b.spent)])
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 8)
 
       return {
         balance: Number(dbSummary.total_balance) || 0,
@@ -230,7 +229,6 @@ export default function Dashboard() {
     
     const sortedCats = Object.entries(catMap)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
 
     const acc = accounts.find(a => String(a.fi_data_id) === selectedAccount)
     let balance = 0

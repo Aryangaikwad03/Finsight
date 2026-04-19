@@ -11,9 +11,9 @@ export default function Signin() {
   const { login, user }         = useAuth()
   const navigate                = useNavigate()
 
-  // If already logged in, go straight to dashboard
+  // If already logged in, go straight to transactions
   useEffect(() => {
-    if (user) navigate('/dashboard', { replace: true })
+    if (user) navigate('/transactions', { replace: true })
   }, [user, navigate])
 
   const validate = (values) => {
@@ -42,7 +42,7 @@ export default function Signin() {
     setApiError('')
     try {
       await login({ email: form.email, password: form.password })
-      navigate('/dashboard')          // ← redirect to dashboard on success
+      navigate('/transactions')          // ← redirect to transactions on success
     } catch (err) {
       const msg = err.response?.data?.detail
       setApiError(typeof msg === 'string' ? msg : 'Incorrect email or password.')

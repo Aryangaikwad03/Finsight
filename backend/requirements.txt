@@ -31,5 +31,5 @@ pdfplumber
 PyPDF2
 pandas
 openpyxl
-xlrd
+xlrd>=2.0.1
 lxml

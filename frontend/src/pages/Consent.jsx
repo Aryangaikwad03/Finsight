@@ -13,6 +13,8 @@ export default function Consent() {
   const [fetchMsg, setFetchMsg]         = useState('')
   const [dataReady, setDataReady]       = useState(false)
   const [pageLoading, setPageLoading]   = useState(true)
+  const [lockedFile, setLockedFile]     = useState(null)
+  const [pdfPwd, setPdfPwd]             = useState('')
   const { user }                        = useAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate                         = useNavigate()
@@ -72,7 +74,7 @@ export default function Consent() {
         setFetchMsg('Financial data successfully fetched!')
         setDataReady(true)
         setConsent(prev => ({ ...prev, status: 'ACTIVE', consent_status: 'ACTIVE' }))
-        navigate('/')
+        navigate('/transactions')
       }, 12000)  // give background task ~12s to complete
     } catch {
       setFetchPhase('error')
@@ -126,14 +128,10 @@ export default function Consent() {
       setTimeout(() => navigate('/transactions'), 2000)
     } catch (err) {
       if (err.response?.status === 401 && err.response?.data?.detail === 'encrypted_pdf') {
-        const pwd = window.prompt("This PDF is password protected. Please enter the password to unlock it:")
-        if (pwd) {
-          return processUpload(file, pwd)
-        } else {
-          setFetchPhase('error')
-          setFetchMsg('Password is required to read this statement.')
-          return
-        }
+        setLockedFile(file)
+        setFetchPhase(null)
+        setFetchMsg('')
+        return
       }
       setFetchPhase('error')
       setFetchMsg(err.response?.data?.detail || 'Failed to upload statement.')
@@ -379,6 +377,44 @@ export default function Consent() {
             setConsent({ consent_id: data.consent_id, status: 'PENDING', consent_status: 'PENDING', vua: null })
           }}
         />
+      )}
+
+      {lockedFile && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+           <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-xl">
+              <h3 className="font-semibold text-slate-800 mb-2">Password Protected PDF</h3>
+              <p className="text-sm text-slate-500 mb-4">Please enter the password to unlock this statement.</p>
+              <input 
+                type="password" 
+                value={pdfPwd}
+                onChange={e => setPdfPwd(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-brand-500" 
+                placeholder="Password (e.g., PAN, DOB)" 
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                 <button 
+                  onClick={() => { setLockedFile(null); setPdfPwd('') }} 
+                  className="px-4 py-2 text-sm bg-slate-100 text-slate-700 rounded-lg font-medium hover:bg-slate-200"
+                 >
+                   Cancel
+                 </button>
+                 <button 
+                  onClick={() => {
+                    if (pdfPwd) {
+                      const f = lockedFile;
+                      setLockedFile(null);
+                      setPdfPwd('');
+                      processUpload(f, pdfPwd);
+                    }
+                  }} 
+                  className="px-4 py-2 text-sm bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700"
+                 >
+                   Unlock
+                 </button>
+              </div>
+           </div>
+        </div>
       )}
     </DashboardLayout>
   )

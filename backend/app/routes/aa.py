@@ -342,6 +342,7 @@ class UpdateCategoryRequest(BaseModel):
     txn_id:      int
     category:    str
     subcategory: str = ""
+    apply_all_narration: str = None
 
 
 @router.patch("/transaction/category")
@@ -355,18 +356,33 @@ async def update_transaction_category(
     user_id = str(user.id)
     conn = get_connection(); cur = conn.cursor()
     try:
-        cur.execute("""
-            UPDATE transactions
-            SET category    = %s,
-                subcategory = %s
-            WHERE txn_id = %s AND user_id = %s
-        """, (body.category.strip(), body.subcategory.strip(), body.txn_id, user_id))
-        if cur.rowcount == 0:
-            conn.rollback()
-            raise HTTPException(status_code=404, detail="Transaction not found")
-        conn.commit()
-        return {"success": True, "txn_id": body.txn_id,
-                "category": body.category, "subcategory": body.subcategory}
+        if body.apply_all_narration is not None:
+            search_pattern = f"%{body.apply_all_narration.strip()}%"
+            cur.execute("""
+                UPDATE transactions
+                SET category    = %s,
+                    subcategory = %s
+                WHERE narration ILIKE %s AND user_id = %s
+            """, (body.category.strip(), body.subcategory.strip(), search_pattern, user_id))
+            if cur.rowcount == 0:
+                conn.rollback()
+                raise HTTPException(status_code=404, detail="Transactions not found")
+            conn.commit()
+            return {"success": True, "updated": cur.rowcount,
+                    "category": body.category, "subcategory": body.subcategory}
+        else:
+            cur.execute("""
+                UPDATE transactions
+                SET category    = %s,
+                    subcategory = %s
+                WHERE txn_id = %s AND user_id = %s
+            """, (body.category.strip(), body.subcategory.strip(), body.txn_id, user_id))
+            if cur.rowcount == 0:
+                conn.rollback()
+                raise HTTPException(status_code=404, detail="Transaction not found")
+            conn.commit()
+            return {"success": True, "txn_id": body.txn_id,
+                    "category": body.category, "subcategory": body.subcategory}
     except HTTPException:
         raise
     except Exception as e:
@@ -386,7 +402,8 @@ async def get_categories(user: User = Depends(get_current_user)):
         # Built-in categories
         # Built-in categories (20-category framework)
         builtin = [
-            {"category": "Food & Dining", "subcategories": ["Restaurants/Cafe", "Groceries"]},
+            {"category": "Food & Dining", "subcategories": ["Restaurants/Cafe"]},
+            {"category": "Groceries", "subcategories": []},
             {"category": "Transportation", "subcategories": ["Fuel", "Taxi/Ride Hailing", "Public Transport"]},
             {"category": "Shopping & Retail", "subcategories": ["E-commerce", "Clothing & Fashion", "Electronics"]},
             {"category": "Bills & Utilities", "subcategories": ["Utilities/BillPay"]},

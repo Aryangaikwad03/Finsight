@@ -31,6 +31,7 @@ const txnTypeBadge = (type) => {
 const categoryIcon = (cat) => {
   const icons = {
     'Food & Dining': '🍴',
+    'Groceries': '🍎',
     'Transportation': '🚗',
     'Shopping & Retail': '🛒',
     'Bills & Utilities': '🧾',
@@ -266,15 +267,22 @@ function CategoryBreakdown({ transactions }) {
 
 // ── Inline category editor ─────────────────────────────────────────────────
 function CategoryEditor({ txn, categories, onSave, onClose }) {
-  const allCats = [
-    ...categories.builtin.map(c => c.category),
-    ...categories.custom.map(c => c.category),
-  ]
+  const extractMerchant = (narration) => {
+    if (!narration) return ''
+    const parts = String(narration).split(/[\/\-@]/)
+    if (narration.toUpperCase().includes('UPI') && parts.length >= 4) {
+      return parts[3] || parts[0]
+    }
+    return narration.substring(0, 20).trim()
+  }
+  
   const [cat, setCat]     = useState(txn.category || 'Other')
   const [sub, setSub]     = useState(txn.subcategory || '')
   const [newCat, setNewCat] = useState('')
   const [saving, setSaving] = useState(false)
   const [showNew, setShowNew] = useState(false)
+  const [applyAll, setApplyAll] = useState(false)
+  const [matchText, setMatchText] = useState(() => extractMerchant(txn.narration))
 
   const currentSubs = useMemo(() => {
     const found = [...categories.builtin, ...categories.custom].find(c => c.category === cat)
@@ -285,7 +293,7 @@ function CategoryEditor({ txn, categories, onSave, onClose }) {
     setSaving(true)
     try {
       const finalCat = showNew && newCat.trim() ? newCat.trim() : cat
-      await onSave(txn.txn_id, finalCat, sub)
+      await onSave(txn.txn_id, finalCat, sub, applyAll ? matchText : null)
       onClose()
     } catch (e) {
       console.error('category update failed', e)
@@ -317,7 +325,14 @@ function CategoryEditor({ txn, categories, onSave, onClose }) {
             {!showNew ? (
               <select value={cat} onChange={e => { setCat(e.target.value); setSub('') }}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
-                {allCats.map(c => <option key={c} value={c}>{categoryIcon(c)} {c}</option>)}
+                <optgroup label="Built-in Categories">
+                  {categories.builtin.map(c => <option key={`b-${c.category}`} value={c.category}>{categoryIcon(c.category)} {c.category}</option>)}
+                </optgroup>
+                {categories.custom.length > 0 && (
+                  <optgroup label="Custom Categories">
+                    {categories.custom.map(c => <option key={`c-${c.category}`} value={c.category}>{categoryIcon(c.category)} {c.category}</option>)}
+                  </optgroup>
+                )}
               </select>
             ) : (
               <input value={newCat} onChange={e => setNewCat(e.target.value)}
@@ -341,6 +356,24 @@ function CategoryEditor({ txn, categories, onSave, onClose }) {
               </select>
             </div>
           )}
+
+          <div className="pt-2 pb-1 space-y-2">
+            <div className="flex items-center gap-2">
+              <input type="checkbox" id="applyAll" checked={applyAll} onChange={e => setApplyAll(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer" />
+              <label htmlFor="applyAll" className="text-xs font-medium text-slate-600 cursor-pointer">Apply to all matching transactions</label>
+            </div>
+            {applyAll && (
+              <div className="pl-6 pb-1">
+                <p className="text-[10px] text-slate-500 mb-1">Match all past & future transactions containing:</p>
+                <input 
+                  value={matchText} 
+                  onChange={e => setMatchText(e.target.value)} 
+                  className="w-full border border-brand-200 bg-brand-50 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  placeholder="Merchant keyword (e.g. ZOMATO)"
+                />
+              </div>
+            )}
+          </div>
 
           <div className="flex gap-2 pt-2">
             <button onClick={onClose}
@@ -411,12 +444,46 @@ export default function Transactions() {
     loadData()
   }, [user?.id, authLoading])
 
-  const handleCategoryUpdate = async (txnId, newCat, newSub) => {
-    await aaAPI.updateCategory({ txn_id: txnId, category: newCat, subcategory: newSub })
+  const handleCategoryUpdate = async (txnId, newCat, newSub, applyToNarration = null) => {
+    await aaAPI.updateCategory({ txn_id: txnId, category: newCat, subcategory: newSub, apply_all_narration: applyToNarration })
     // Update local state instantly — no reload needed
-    setAllTxns(prev => prev.map(t =>
-      t.txn_id === txnId ? { ...t, category: newCat, subcategory: newSub } : t
-    ))
+    setAllTxns(prev => prev.map(t => {
+      if (applyToNarration && String(t.narration).toLowerCase().includes(applyToNarration.toLowerCase())) {
+        return { ...t, category: newCat, subcategory: newSub }
+      }
+      return t.txn_id === txnId ? { ...t, category: newCat, subcategory: newSub } : t
+    }))
+    
+    // Dynamically inject custom category into the dropdown schema if newly created
+    setCategories(prev => {
+      if (!newCat) return prev
+      const isBuiltin = prev.builtin.find(c => c.category === newCat)
+      const customIdx = prev.custom.findIndex(c => c.category === newCat)
+      
+      if (isBuiltin) {
+        if (newSub && !isBuiltin.subcategories.includes(newSub)) {
+           isBuiltin.subcategories.push(newSub)
+        }
+        return prev
+      }
+      
+      const nextCustom = [...prev.custom]
+      if (customIdx >= 0) {
+        if (newSub && !nextCustom[customIdx].subcategories.includes(newSub)) {
+          nextCustom[customIdx] = {
+            ...nextCustom[customIdx],
+            subcategories: [...nextCustom[customIdx].subcategories, newSub]
+          }
+        }
+      } else {
+        nextCustom.push({
+          category: newCat,
+          subcategories: newSub ? [newSub] : [],
+          custom: true
+        })
+      }
+      return { ...prev, custom: nextCustom }
+    })
   }
 
   const toggleAccount = (id) => {

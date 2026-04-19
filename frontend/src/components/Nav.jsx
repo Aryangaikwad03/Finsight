@@ -11,7 +11,7 @@ export default function Nav() {
               <div className="absolute inset-0 bg-gradient-to-br from-brand-400 to-brand-700 animate-pulse"></div>
               <svg className="w-5 h-5 text-white relative z-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
             </div>
-            <span className="font-bold text-xl tracking-tight text-slate-900">FinVault</span>
+            <span className="font-bold text-xl tracking-tight text-slate-900">FinSight</span>
           </div>
 
           <div className="flex items-center space-x-4">

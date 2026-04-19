@@ -7,7 +7,6 @@ import SignUp       from './pages/SignUp'
 import Dashboard    from './pages/Dashboard'
 import Consent      from './pages/Consent'
 import Transactions from './pages/Transactions'
-import Assistant    from './pages/Assistant'
 import Goals        from './pages/Goals'
 
 export default function App() {
@@ -21,7 +20,6 @@ export default function App() {
           <Route path="/dashboard"    element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/consent"      element={<ProtectedRoute><Consent /></ProtectedRoute>} />
           <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
-          <Route path="/assistant"    element={<ProtectedRoute><Assistant /></ProtectedRoute>} />
           <Route path="/goals"        element={<ProtectedRoute><Goals /></ProtectedRoute>} />
         </Routes>
       </AuthProvider>

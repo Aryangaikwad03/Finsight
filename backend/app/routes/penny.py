@@ -250,7 +250,7 @@ async def auto_categorize(
     conn = get_connection(); cur = conn.cursor(cursor_factory=_extras.RealDictCursor)
     try:
         cur.execute("""
-            SELECT txn_id, txn_type, payment_mode, narration, amount, category, subcategory
+            SELECT txn_id, txn_type, payment_mode, narration, amount, category
             FROM transactions WHERE user_id = %s AND txn_id = ANY(%s)
         """, (user_id, body.txn_ids))
         txns = [dict(r) for r in cur.fetchall()]
@@ -260,8 +260,8 @@ async def auto_categorize(
         for s in suggestions:
             if float(s.get("confidence", 0)) >= 0.7:
                 cur2.execute(
-                    "UPDATE transactions SET category=%s, subcategory=%s WHERE txn_id=%s AND user_id=%s",
-                    (s.get("category"), s.get("subcategory"), s.get("txn_id"), user_id)
+                    "UPDATE transactions SET category=%s WHERE txn_id=%s AND user_id=%s",
+                    (s.get("category"), s.get("txn_id"), user_id)
                 )
                 if cur2.rowcount > 0: updated += 1
         conn.commit(); cur2.close()

@@ -104,14 +104,14 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
                              "PIZZA", "DOMINO", "BURGER KING", "SUBWAY", "STARBUCKS", "CCD"]):
         return ("Food & Dining", "Restaurants/Cafe")
     if any(w in n for w in ["GROCERY", "DMART", "RELIANCE FRESH", "JIOMART", "BLINKIT",
-                             "ZEPTO", "INSTAMART", "BIGBASKET", "GROFERS", "MORE RETAIL"]):
-        return ("Food & Dining", "Groceries")
+                             "ZEPTO", "INSTAMART", "BIGBASKET", "GROFERS", "MORE RETAIL", "SUPERMARKET"]):
+        return ("Groceries", "")
 
     # --- Healthcare & Medical ---
     if any(w in n for w in ["APOLLO", "MEDPLUS", "PRACTO", "PHARMEASY", "NETMEDS", "HOSPITAL",
                              "CLINIC", "DOCTOR", "PHARMACY", "MEDICINE", "MEDICAL",
                              "THYROCARE", "LENSKART", "HEALTHKART", "NARAYANA", "FORTIS"]):
-        return ("Healthcare", "Healthcare/Medical")
+        return ("Healthcare & Medical", "Healthcare/Medical")
 
     # --- Education ---
     if any(w in n for w in ["BYJU", "UNACADEMY", "COURSERA", "UDEMY", "SKILL INDIA",
@@ -123,7 +123,7 @@ def classify_transaction(mode: str, txn_type: str, narration: str = "") -> tuple
     if any(w in n for w in ["NETFLIX", "PRIME VIDEO", "HOTSTAR", "SPOTIFY", "YOUTUBE PREMIUM",
                              "APPLE MUSIC", "AMAZON PRIME", "DISNEY PLUS", "GAANA", "JIOSAAVN",
                              "MULTIPLEX", "PVR", "INOX", "BOOKMYSHOW", "SONYLIV", "VOOT"]):
-        return ("Entertainment", "Entertainment/Subscriptions")
+        return ("Entertainment & Leisure", "Entertainment/Subscriptions")
 
     # --- Transportation ---
     if any(w in n for w in ["PETROL", "FUEL", "HPCL", "BPCL", "IOCL", "SHELL", "INDIAN OIL"]):
@@ -836,14 +836,16 @@ def get_recurring_expenses(user_id: str) -> list[dict]:
         query = """
             SELECT 
                 SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30) as merchant,
+                category,
                 ROUND(AVG(amount), 2) as avg_amount,
                 COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) as months_active
             FROM transactions
             WHERE user_id = %s AND amount > 0 AND txn_type IN %s
-            GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30)
-            HAVING COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) >= 2 
-               AND (MAX(amount) - MIN(amount)) / NULLIF(AVG(amount), 0) < 0.1
-            ORDER BY avg_amount DESC LIMIT 10
+            GROUP BY SUBSTRING(UPPER(TRIM(narration)) FROM 1 FOR 30), category
+            HAVING (COUNT(DISTINCT TO_CHAR(txn_date, 'YYYY-MM')) >= 3 
+               AND (MAX(amount) - MIN(amount)) / NULLIF(AVG(amount), 0) < 0.2)
+               OR category IN ('Subscription Services', 'Housing & Rent', 'Insurance', 'EMI & Loans', 'Entertainment & Leisure')
+            ORDER BY avg_amount DESC LIMIT 15
         """
         cur.execute(query, (user_id, expense_types))
         return [dict(r) for r in cur.fetchall()]
@@ -863,7 +865,6 @@ def get_largest_transactions(user_id: str, limit: int = 5) -> list[dict]:
             SELECT txn_date, amount, category, narration
             FROM transactions
             WHERE user_id = %s AND txn_type IN %s 
-              AND txn_date >= DATE_TRUNC('month', CURRENT_DATE)
             ORDER BY amount DESC LIMIT %s
         """
         cur.execute(query, (user_id, expense_types, limit))

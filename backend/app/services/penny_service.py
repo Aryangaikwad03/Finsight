@@ -216,7 +216,7 @@ Net Cash Flow: ₹{net:,.2f} ({'surplus/savings capacity' if net >= 0 else 'defi
     if recurring:
         ctx += "=== IDENTIFIED RECURRING SUBSCRIPTIONS & EMIs ===\n"
         for r in recurring:
-            ctx += f"• {r.get('merchant', 'Unknown')}: ~₹{float(r.get('avg_amount') or 0):,.2f} / month (Active for {r.get('months_active')} months)\n"
+            ctx += f"• {r.get('category', 'Unknown')}: ~₹{float(r.get('avg_amount') or 0):,.2f} / month (Active for {r.get('months_active')} months)\n"
         ctx += "\n"
         
     # Anomalies
@@ -231,7 +231,7 @@ Net Cash Flow: ₹{net:,.2f} ({'surplus/savings capacity' if net >= 0 else 'defi
     rows = breakdown.get("breakdown", [])
     if rows:
         ctx += "=== SPENDING BY CATEGORY ===\n"
-        for row in rows[:10]:
+        for row in rows[:20]:
             cat   = row.get("category", "Other")
             amt   = float(row.get("total_amount") or row.get("spent") or 0)
             count = row.get("txn_count", 0)
@@ -281,7 +281,8 @@ You MUST follow these rules at all times:
 3. Never give speculative investment advice (no stock picks).
 4. Be concise — 3-5 lines max unless the user explicitly asks for detail.
 5. Use ₹ for Indian Rupees and Indian numbering (lakhs/crores).
-6. Always end with one actionable tip grounded in the user's actual data."""
+6. Always end with one actionable tip grounded in the user's actual data.
+7. Unnecessary Expenses/Cutdowns: When asked, do NOT classify fixed recurring subscriptions (Netflix, Prime, Gym, Rent, EMIs) as unnecessary. Focus strictly on variable/impulsive areas like Food & Dining, excessive Shopping, or unusually large generic expenses."""
 
 
 def build_base_financial_snapshot(user_id: str, user_name: str) -> str:
